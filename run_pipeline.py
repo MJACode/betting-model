@@ -1048,6 +1048,25 @@ def step_alt_game_lines(run_date: str) -> bool:
     return step_succeeded(summary)
 
 
+def step_nba_injury_report(run_date: str) -> bool:
+    """The league's official injury report, every 15-minute PDF of the three ET
+    dates before run_date (mike, 2026-11-27; issue #1523). Completed days only:
+    a slot of today that has not been published yet would be recorded as
+    missing. The loader's ledger skips a report it already holds, so a normal
+    day reads yesterday's alone. Free. Until this step, nothing fetched the report on a schedule: it stopped
+    on 2026-05-10 and again on 2026-11-25 after a one-off backfill."""
+    from datetime import date as _date, timedelta as _td
+    try:
+        from data.ingestors.nba_injury_report import run_dates
+        day = _date.fromisoformat(run_date)
+        res = run_dates([day - _td(days=n) for n in (3, 2, 1)], label="daily")
+        logger.success(f"✓ NBA injury report: {res}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA injury report failed: {type(exc).__name__}: {exc}")
+        return False
+
+
 def step_nba_quarters(run_date: str) -> bool:
     """NBA first-quarter team stats for the Stats tab (Matt, 2026-10-28).
 
@@ -2886,6 +2905,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         results["nba_quarters"] = _timed_step(
             "nba-quarters", lambda: step_nba_quarters(run_date), run_date)
 
+        # ── Step 0c1b: the official NBA injury report, the three days before ─────
+        checkpoint("nba_injury_report")
+        results["nba_injury_report"] = _timed_step(
+            "nba-injury-report", lambda: step_nba_injury_report(run_date), run_date)
+
         # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
         # Keeps the table (public track record + mobile action filter + Discord)
         # in lockstep with config.py so a threshold/pause change never needs a
@@ -3387,7 +3411,7 @@ Examples:
                                  "dailyfaceoff-lines", "nhl-edge",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
+                                 "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-quarters", "nba-injury-report", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "ncaabw-results", "ncaabw-schedule", "ncaabw-box",
@@ -3506,6 +3530,7 @@ Examples:
             "wnba-results": lambda: step_wnba_results(run_date),
             "nba-results":  lambda: step_nba_results(run_date),
             "nba-quarters": lambda: step_nba_quarters(run_date),
+            "nba-injury-report": lambda: step_nba_injury_report(run_date),
             "alt-game-lines": lambda: step_alt_game_lines(run_date),
             "nba-schedule": lambda: step_nba_schedule(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),

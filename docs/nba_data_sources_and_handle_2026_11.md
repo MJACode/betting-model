@@ -481,3 +481,332 @@ shares bought before tip, 814,908 fifteen-minute rows.
 4. **The earlier prop snapshot is the more promising lead.** `nba_prop_market`'s frozen rule at
    10 hours returned +5.8% a bet on 7,572 bets against +2.6% at 1 hour on the same games, ahead in
    every season. Its 2025-26 value against Pinnacle's later price was +0.78%.
+
+## F. Third pass (2026-11-27, mike: "Become a data detective ... what data sources are we not using ... what datasets can we start to build")
+
+Five web passes and one pass over the earlier research, all on 2026-11-27 between 13:35 and
+14:50 UTC, from mike's PC. Nothing was bought, no key was used, nothing was written to the
+database. Each pass's full file, with every URL, status and field list, is in
+`data/local/research/nba_research/reassess/datasrc_2026_11_27/` (`A_official_feeds.md`,
+`B_open_datasets.md`, `C_lineups_news.md`, `D_price_venues.md`, `E_forums.md`); probe scripts and
+raw responses in `%TEMP%/nba_datasrc/`. Nothing below has been backtested: this section says what
+exists and what it holds, not whether it makes money.
+
+**What changed since sections B and D.** Those passes could open no page from the dev sandbox.
+From the PC, web.archive.org, GitHub, Kaggle, official.nba.com, stats.nba.com and cdn.nba.com all
+answer, so several "no history" and "blocked" lines above are replaced here.
+
+### F1. What the NBA models read today, and what is frozen (production, read 2026-11-27)
+
+Current: results and box lines (`nba_player_game_log` to 2026-11-25), play-by-play and on-court
+segments (`nba_pbp_games` 270 games this season), quarter scores, schedule, ESPN injuries and
+news, every price table.
+
+| Feed | Newest row | Rows since 2026-10-01 |
+|---|---|---|
+| Enriched box: exact minutes, usage, possessions, fouls (`nba_player_game_adv`) | 2026-06-13 | 0 |
+| Inactive lists (`nba_game_inactives`) | 2026-05-30 | 0 |
+| Referee crews (`nba_game_officials`) | 2026-06-13 | 0 |
+| Official injury report (`nba_injury_report`) | report date 2026-11-24; last fetch 2026-11-25 14:03 UTC | 57,987 (Matt's one-off backfill; no schedule) |
+
+### F2. League feeds: reachable after all
+
+- **stats.nba.com answers from the PC with a full browser header set** (User-Agent, Referer and
+  Origin for www.nba.com, Accept, Accept-Language, the three `Sec-Fetch-*` headers, compressed).
+  28 of 29 endpoints returned 200 in under 1.2 s; with the smaller header set it timed out at
+  40 s. `nba_api` 1.11.4 (the repo's) and 1.12.0 both answer. Not tested from the Railway worker.
+- **cdn.nba.com answers with the same header set**, and its storage origin
+  (`nba-prod-us-east-1-mediaops-stats.s3.amazonaws.com/NBA/liveData/boxscore/boxscore_<id>.json`)
+  answers with a bare User-Agent, byte-identical. The file holds officials, attendance, starters
+  and **the reason each inactive player sat** (`INACTIVE_INJURY` with a description,
+  `INACTIVE_COACH`, `INACTIVE_GLEAGUE_TWOWAY`). `nba_game_inactives.reason` is empty on every
+  stored row. Depth: a 2019-20 game 200, a 2018-19 game 403.
+- **The three frozen feeds can be loaded now.** The loader's inputs for 2026-27 are live:
+  sportsdataverse `player_boxscores_2027` / `officials_2027` / `game_rosters_2027` hold 7,518 /
+  811 / 2,245 rows over 270 / 270 / 265 games (updated 2026-11-26 17:33 UTC); PlayerGameLogs
+  Advanced returned 6,033 rows to 2026-11-25. Command:
+  `python -m data.ingestors.nba_box_enrich --seasons 2027 2027`. Not run (a database write).
+- **Referee crews post at 9:12-9:13 am ET.** `official.nba.com/wp-json/api/v1/get-game-officials?date=YYYY-MM-DD`
+  (the parameter is `date`): empty at 14:12:05 UTC, 11 NBA and 8 G League games at 14:13:06 UTC.
+  Seven archived captures agree (empty at 7:36, 8:53, 9:00 am ET; filled at 9:11, 9:18, 9:31,
+  10:12). History answers back to 2015-12-25 with no publication time.
+- **The league's own lineup file**, `stats.nba.com/js/data/leaders/00_daily_lineups_YYYYMMDD.json`:
+  each player Expected or Confirmed, Active or Inactive, with a stamp. Today's was written 08:32
+  ET and rewritten at 08:47 and 09:02. For 5 of the 12 teams that also played on 11-25 the
+  Expected five differs from that game's confirmed five. Dated files exist from 2023-10-24 and
+  hold only the final state (stamps 137 to 260 minutes after tip), so they carry this season's
+  starters and inactives (2026-11-25: 234 active, 80 inactive) and no timing. "Confirmed" was
+  seen 54 minutes before tip on one archived capture and at least 24 minutes before on another.
+- **Per-game optical tracking per player from 2013-14**: `boxscoreplayertrackv3` (touches,
+  passes, rebound chances, contested and uncontested shots, speed, distance), one call a game.
+  Hustle box from 2016-17. Potential assists per day from `leaguedashptstats` with
+  `DateFrom=DateTo`. The research cache holds these per day for 2023-24 on only, and none of it
+  is in the database. No per-shot defender distance exists; play types are season-to-date only.
+- **Transactions**: `stats.nba.com/js/data/playermovement/NBA_Player_Movement.json`, 10,153 rows,
+  2015-07-01 to 2026-11-25, dated to the day. No G League moves, no coaching changes.
+- **Injury report**: `www.nba.com/players/injury-report` listed 36 PDFs for the day, every 15
+  minutes; the PDF host answered 200 with a bare User-Agent.
+
+### F3. Sources with a real history (can be backtested)
+
+| Source | What it holds | History | The catch |
+|---|---|---|---|
+| **DraftKings daily-fantasy salaries** (`www.draftkings.com/lineup/getavailableplayerscsv?contestTypeId=70&draftGroupId=<id>`) | The morning salary of every player on every slate: a price on expected output, hence on role | Slates back to 2014-12-08 still served; `ForgeDFS/forge-hist` indexes 9,064 NBA slates on 813 dates, 2022-08-02 to 2026-11-07 (holes: 2022-10, 2023-10, 2024-02); RotoGuru holds 2014-10-29 to 2021-05-10 | A posted salary did not change once posted: 0 of 1,330 player-rows over 8 slates, read from `forge-hist`'s own timestamped re-captures of this season's files (8 to 14 captures a slate over about 25 hours), not from our polling. How long before tip a slate's salaries post is not measured. The `Status` and `Starting` columns are the end state: do not use them |
+| **RotoWire per-game projections, through Sleeper** (`api.sleeper.app/projections/nba/<season>/<week>?season_type=regular`) | Projected minutes, points, rebounds, assists, steals, blocks, turnovers | Every week tried, 2019-20 to 2026-27 | The stored version is the last one before the game: only 4 to 13 players a week were projected 15+ minutes and did not play, so late scratches are already out. A backtest on it is an upper bound. Minutes error 4.3 to 5.0 minutes mean absolute |
+| **ESPN's odds feed, prop openers** (`sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/{id}/competitions/{id}/odds/{provider}/propBets`) | Each prop's opening line and price | 2022-11 on (a season before any prop price we hold); provider 40 or 100 DraftKings, 58 ESPN BET in 2024-25 | The opener has no time; the last value on a finished game is stamped after tip; 2026 rows do not say which price is the over; three December 2025 / January 2026 dates returned 404 |
+| **Kalshi NBA props and derivatives** (`api.elections.kalshi.com/trade-api/v2`, 286 `KXNBA` series) | Every trade, timestamped: points props 1,369 game events from 2025-11-18, rebounds 1,339, first-half totals 867 from 2026-02-10, team totals 810 from 2026-02-09, first-quarter totals 286 from 2026-06-03 | As dated | Threshold ladders, not one line. In the one market split at tip, 78.0% of contracts traded after tip and 5.5% more than 6 hours before. No first-basket market. Already tested as a place to bet (2026-11-18): its price after fees was a median 3.84 points worse than the books on our bets. `data/ingestors/kalshi_prop_ingestor.py` exists; it holds no NBA series |
+| **BetMGM bet % and money %** (Kaggle `caseydurfee/mgm-grand-nba-betting-data`, CC BY-SA 4.0) | Spread, total, moneyline splits at one named book | 6,081 rows, 6,069 games, 2021-10-19 to 2026-02-12 (playoffs included), 5,646 with splits; one value a game, time of capture not stated | Graded below (F3a): nothing. The Yahoo endpoint behind it (`graphite.sports.yahoo.com/v1/query/shangrila/gameOdds`) still fills this season's finished games and has emptied 2026-04 and earlier |
+| **numberFire daily projections** (Wayback) | Projected minutes and stats, FanDuel salary | 109 capture days October 2022 to March 2023; almost none after | One capture opened (268 players) |
+| **VSiN per-game DraftKings split history** (Wayback) | Handle % and bets % at 12-minute steps | 174 NBA games, 2023-10-24 to 2025-03-25 | Too few games for more than a sanity check |
+| **PrizePicks standard lines** (`enkday/prizepicks-data-mirror`) | One board a day at about 7 am ET | 283 days, 2025-12-06 on | File shape changed in January 2026 |
+
+### F3a. The BetMGM file, graded the same day
+
+This replaces verdict E.3's "retail sportsbook handle with history cannot be rebuilt" for one
+book: BetMGM's closing bet % and money % exist for 6,069 NBA games. Graded on the file's own
+prices and results, 1 unit to win, risk capped at 3, pushes out
+(`%TEMP%/nba_datasrc/mgm_grade.py`, 2026-11-27). When each value was captured is not stated, so
+this is the split at or near the close, as A3 was.
+
+| Rule | Spread | Total | Moneyline |
+|---|---|---|---|
+| Fade the side with bets >= 60% | 3,524 bets, -1.47% | 5,213, -5.24% | 5,223, -5.12% |
+| >= 70% | 1,821, -0.48% | 4,549, -5.06% | 4,658, -4.30% |
+| >= 80% | 611, +1.31% | 3,250, -5.29% | 3,640, -3.72% |
+| Follow money when money % - bets % >= 10 | 825, -0.69% | 173, -11.96% | 2,504, -6.63% |
+| >= 20 | 124, -2.90% | 11 bets | 1,164, -13.83% |
+| >= 30 | 34 bets | 0 bets | 542, -15.73% |
+| Every home / away, over / under bet | -5.47% / -3.64% | -3.86% / -4.54% | -5.49% / -2.99% |
+
+Returns are on risk. No cell of 18 is a bet. The best with size, the 80% spread fade, is +1.31%
+on 611 and reads -6.5% / +1.6% / +10.1% / -2.2% / +34.7% by season (196 / 205 / 80 / 96 / 34
+bets). BetMGM's money and bets columns are close to each other in every season (median gap on
+the spread 4.3, 4.3, 4.0, 3.3, 3.1 points for 2021-22 to 2025-26; on the total 2.9 to 1.2), so
+this file has no "sharp money against public tickets" reading either. Same answer as A3 and the
+published NBA study.
+
+Still no usable archive: projected lineups (RotoWire's page was captured on 4 / 32 / 56 days of
+2023-24 / 2024-25 / 2025-26, every other site on fewer) and retail handle (DraftKings' splits
+page: 81 captures in total, 7 of them NBA).
+
+### F4. Perishable feeds: no history exists, each day not saved is gone
+
+All answered today with no key. "Polls" is the cadence the passes propose.
+
+| Feed | What is lost if not saved | When it is known | Polls |
+|---|---|---|---|
+| League lineup file (F2) | The morning Expected five, and the minute Expected turns Confirmed and inactives appear | From about 8:30 am ET; Confirmed around 25 to 55 minutes before tip (two observations) | Every 20 minutes from the morning; every 1 to 2 minutes from 90 to 20 minutes before tip |
+| Referee API (F2) | The posting time, late crew changes, G League crews | 9:12 am ET | Every minute 8:45 to 9:45 am ET, then hourly |
+| Pinnacle's guest feed (`guest.api.arcadia.pinnacle.com/0.1/leagues/487/markets/straight`) | The bet limit on every market: spread 5,000, total 2,000, moneyline 3,000, team total 500, props 250 about 10 hours out; 613 markets, 113 props | All day | With every prop fetch |
+| Unabated's public prop file (`content.unabated.com/markets/v2/league/3/propodds.json`) | Each book's opening line, opening price and last-change time per prop, 28 sources (Bookmaker, BetOnline, Bovada, Novig, ProphetX, PrizePicks, Underdog, Sleeper); 5,922 records | As props post | Every 10 minutes |
+| Sleeper projections (F3), live version | The projection as it stood at each hour: 201 of 1,688 rows changed between 12:40 and 13:40 UTC, all for tonight | Hourly | Hourly from 18:00 ET the day before |
+| Pick'em boards: PrizePicks (`partner-api.prizepicks.com/projections?league_id=7`, 9,198 lines, 912 with a popularity count), Underdog (`/v1/over_under_lines`, 1,327 lines with a payout per side), Sleeper (`/lines/available`, 1,530 lines with pick counts) | Which side the public is on per prop, and each app's payout lean. 657 of 1,504 Sleeper lines changed in 33 minutes | All day | Every 10 minutes |
+| ESPN prop feed, live | A free timestamped prop path (`lastUpdated` per row): 1,097 DraftKings props on tonight's MIA @ NY, 679 stamped about 24 hours before tip; first basket, quarter and half lines included | From about 24 hours out | Hourly |
+| Yahoo / BetMGM splits (F3) | This season's finished games, before they are emptied | Now | Daily |
+| Underdog news feed (`api.underdogfantasy.com/v1/news_items?sport_id=NBA`) | 3,900 items stamped to the second, 30 days rolling (oldest 2026-10-28), sourced from RotoWire | As news breaks | Every 5 minutes |
+| RotoWire lineups page | Projected fives with play-probability tags and a "Referees:" line | All day | Every 20 minutes |
+
+**None of these was probed from the Railway worker.** stats.nba.com is known to refuse
+datacenter addresses, so the lineup file may need the PC's scheduled feeds (the route the
+DraftKings live board already uses) or the storage origin; that probe is the first task of
+every capture. **Which are being lost today with no backstop:** Pinnacle's limits, Unabated's
+openers, the pick'em boards, Underdog's news (30 days rolling), the Yahoo / BetMGM splits and
+the referee posting time. The lineup file and FanDuel's projections are being saved by
+strangers' repos (below), which can stop at any time.
+
+**Terms.** No terms page was read for any feed in F3 or F4 except: the BetMGM file is CC BY-SA
+4.0; Unabated's pricing page shows "a year of Unabated Premium for just $1,399" (terms not read);
+the three GitHub repos carry no licence file. Dunks & Threes' terms are in D7.
+
+Three public repos already save some of this and can backfill a few weeks:
+`dfsstartinglineups/nbastartingingfive` (a lineup scrape every 5 minutes since 2025-12-17, with a
+`verified` flag), `llslumpll/nba-prop-board` (the league lineup file every 20 minutes since
+2026-10-28, 2,845 versions), `925Sports/nba-dfs-data` (FanDuel Research projections with minutes
+since 2026-11-13, DraftKings salaries since 2026-10-19).
+
+### F5. What practitioners say (forums, with the evidence grade)
+
+- **Named by people with a published record: playing time, and availability known early.**
+  Establish The Run reports +10.1% to +14.7% on 935 to 1,246 NBA props a season for four seasons
+  (self-reported). Unabated, 2026-10-15: "A second or two often makes a huge difference".
+- **r/algobetting, 33,906 comments, 2023-06 to 2026-11, distinct authors in an NBA context**
+  (keyword counts, rough): other books' prices and line moves 232, in-play 109, injury and lineup
+  news 57, limits 48, minutes projection 18, referees 15, tracking 13, first basket 1.
+- **Said not to work:** referee over/under tendencies (about 3.3 points of standard error at 30
+  games a crew), tracking and usage features added wholesale ("massive overfitting"), in-play
+  models on public feeds. Our own tests agree on referees and shot quality (section B1, and the
+  reassessment's backtests).
+- **Forum "edges" are not evidence.** Two accounts posted the same rest-advantage rebound table
+  two weeks apart with different hit rates.
+- **The league's 2026-10-16 memo to sportsbooks** bans opening-tip bets and unders on players
+  expected to play under 12 minutes (AP, Covers). First basket is still offered: the model wrote
+  3 bets on games since 2026-11-24 (`picks`, read 2026-11-27).
+
+### F6. Screened out in this pass
+
+prosportstransactions.com (Cloudflare 403 on every route), BettingPros API (needs a key), DFS
+ownership % (needs a login), Kaggle prop sets (samples of 15 to 509 KB), DailyFantasyFuel dated
+pages (top 25 players, fantasy points only), FanDuel Research and NBA.com lineup pages on Wayback
+(captures hold no rows), raw tracking newer than the 2015-16 SportVU set (none public),
+`winprobabilitypbp` (500), Synergy play types (no dates), BALLDONTLIE (documents prop openers
+with a time and projected lineups at $39.99 a month; 401 without a key, nothing seen).
+
+### F7. Who would read each source, and what is already closed
+
+| Source | A live model that could read it | A paused model | Already tested here |
+|---|---|---|---|
+| League lineup file (Expected / Confirmed, inactives) | First basket: it decides 5 to 20 minutes before tip on the starters the books list | Both prop models (45 to 57 minutes out, before most confirmations) | Never available to test. Refusing prop bets after a late scratch failed on three seasons, using the injury report, not lineups |
+| DraftKings salaries | None directly | Prop projection (minutes) | Not tested |
+| RotoWire projections through Sleeper | None directly | Prop projection (minutes) | Not tested. Our own projections were accurate on average (2026-11-20) |
+| Referee crews, posted 9:12 am ET | The three shooting-luck totals, first-quarter spread | | Crews added to Pinnacle's total made it worse in 3 of 5 seasons. The posting time itself is new |
+| Enriched box, inactive reasons (the frozen feeds) | None reads them live | Prop projection was trained on the official injury report | Stored history is complete to 2025-26 |
+| Tracking box 2013-14 to 2022-23 | None | Prop projection | Tracking improved fit for assists, steals and blocks and no priced cell passed (2023-24 on). No prop prices exist before 2023-24 to grade the older seasons |
+| ESPN prop openers, Unabated openers | None | Prop under model (its 10-hour paper test is the same idea: an earlier price) | The 10-hour snapshot graded +5.8% a bet against +2.6% at 1 hour (D5) |
+| Pinnacle limits | None | Prop under model (it prices off Pinnacle) | Named on 2026-11-14, never collected |
+| Pick'em boards (pick counts, payout leans) | None | Both prop models | Never available. Game-level public splits are null three times over (A3, D6 / D8, F3a) |
+| Kalshi props, first-half and team totals | The totals models, as a second price | Prop models | As a place to bet: worse price (2026-11-18). As information: game-winner flow added nothing (D6) |
+| BetMGM splits | None | | F3a: nothing |
+
+### F8. Read
+
+1. **What is new is timed lineups and outside minutes projections; neither was ever available
+   to test.** Practitioners with a record name playing time and early availability, but that is
+   their claim, and four availability ideas built on the injury report have already failed here
+   (teammate absences as features, late-scratch refusals, forecasting Questionable players,
+   with-or-without-teammate projections). A1 shows where the losses are, not why.
+2. **Ranked by honest history, a reader and not already failed:**
+   1. DraftKings salaries (as-of honest, 2014 on) against the paused projection model's minutes.
+   2. RotoWire projections through Sleeper (2019-20 on), as an upper bound only.
+   3. The lineup file for first basket: no history, a live reader, perishable.
+   4. Prop openers (ESPN from 2022-11, Unabated forward): extends the one lead that graded well (D5).
+   5. Pinnacle limits and pick'em boards: no history, no test possible until collected.
+3. **Low on the list despite being easy:** tracking backfill (no priced cell passed), referee
+   crews (failed as a totals input), Kalshi props (worse price, no information at game level),
+   every handle source (null on three independent sets).
+4. **Three stored feeds are not being loaded this season** (F1), and the route is open (F2).
+5. **Earlier research already named most of the F4 captures** (2026-11-11 to 11-14: lineup file
+   each minute, referee posting time, daily hustle, Pinnacle limits). Its own notes say none had
+   started.
+
+## G. The collectors (2026-11-27, mike: "1) yes 2) yes")
+
+### G1. This season's missing feeds, loaded
+
+`python -m data.ingestors.nba_box_enrich --seasons 2027 2027`, run from mike's PC at 18:51 UTC.
+Read back on production: enriched boxes 7,518 rows over 270 games, referee crews 811 rows over
+270 games, inactive lists 2,245 rows over 265 games, each to 2026-11-25; 270 games of 2026-27
+had a final score. The five games with no inactive rows are all of 2026-10-26: DAL at MIA,
+GSW at DEN, IND at MIL, MEM at UTA and PHX at OKC. Why is not established (the source file was
+not opened for that date). The league's lineup file for that date is the route to fill them
+(#1674); not done. The load will run once a day from the PC's `NbaFeeds` task once that task is
+registered (G4); until then nothing schedules it.
+
+### G2. What is saved, and how
+
+`data/ingestors/nba_feeds.py`. One change log for every feed, keyed on OUR read time, because
+the feeds restamp themselves (the lineup file rewrites every row's stamp about every 15 minutes
+with nothing changed). A row is written only when what we compare changed; a state that returns
+to an earlier value is written again; a failed read writes its ledger row and nothing else.
+An item that leaves a feed that lists everything (a starter dropped from an Expected five, a
+pulled line) is written once as gone, and only while its game has not started: each item is
+stored with the time it stops being compared (the tip for a line; 3am ET the next day for a
+lineup row), so a board emptying at tip-off is not thousands of "gone" rows. A read that comes
+back empty while live items are held is recorded as an error. Rows written before this rule
+(2026-11-27, before about 20:15 UTC) can include "gone" rows from a game starting.
+
+| Table | Holds |
+|---|---|
+| `nba_feed_fetches` | one row per read: feed, where from (`pc` / `worker`), HTTP status, bytes, items, how many changed, the error if any |
+| `nba_feed_changes` | one row per (feed, item, our read time) when the item's state changed; the state as JSON |
+| `nba_feed_latest` | the hash last stored per item: what the next read is compared with |
+
+All three are worker-only (row security on, no access for the app's public roles; read back
+2026-11-27). Reading "what was known at time T": the newest `nba_feed_changes` row per item with
+`seen_at <= T`.
+
+| Feed | Every | An item is | What is compared |
+|---|---|---|---|
+| `nba_lineups` | 1 min (15 min from 2am to 8am ET) | a player in a game, and each team's fives | Expected / Confirmed, Active / Inactive, position; the team's Expected five, confirmed starters and inactive list |
+| `nba_referees` | 1 min 8:30 to 10am ET, else 30 min | a game (NBA and G League), and the day's replay centre | the crew |
+| `underdog_news` | 2 min | a news item | title, text, the feed's created and updated times, player |
+| `sleeper_projections` | 10 min | a player on a date, today on | projected minutes and stats, injury status and note |
+| `pinnacle_nba` | 5 min | a pre-game market (game lines, periods, team totals, player props) | prices, points and the stake limit |
+| `unabated_props` | 15 min | (event, player, bet type, side, source) | line, price, opening line, opening price |
+| `prizepicks_lines` / `prizepicks_counts` | 10 min / 1 hour | a pre-game line | the line and its type / its pick count |
+| `underdog_lines` | 15 min | a pre-game NBA line | the line and each side's price and payout |
+| `sleeper_lines` / `sleeper_counts` | 10 min / 1 hour | a pre-game line | the line and payouts / picks on each side. No "gone" rows: a Sleeper line carries no start time |
+| `yahoo_mgm_splits` | 10 min | a game | BetMGM's price, money % and bets % per option; this is a dated pre-tip handle series from 2026-11-27 |
+
+Pick counts sit in their own feeds so that a count ticking up is not a line row.
+
+### G3. Measured before the first production write, and after
+
+Two reads in memory, no database, 2.5 minutes apart (19:05 and 19:07 UTC): Pinnacle 560 of
+1,431 markets changed, PrizePicks lines 359 of 10,350, PrizePicks counts 1,101 of 1,472, Sleeper
+lines 98 of 1,439, Underdog lines 4 of 1,374, Unabated 0 of 38,085, Sleeper counts 4 of 1,246.
+Two Pinnacle reads two minutes apart straight after: 0 of 1,431. The 560 were one burst, not
+noise (spread limits of 10,000 appeared on 55 markets).
+
+First state stored 2026-11-27 18:59 to 19:17 UTC: about 60,000 rows, 40 MB in the change log and
+14 MB in the latest table. The database is 100 GB. Growth per day is to be read off
+`nba_feed_fetches` after a full day (#1676).
+
+Backfilled once: Underdog's news, every page it still served, 3,892 items back to 2026-10-28;
+BetMGM's splits for this season's games (count in the session entry).
+
+**Yahoo refuses a fast reader.** A first backfill at four requests a second was refused after
+about 650 requests (connection refused) and had stored nothing, because it stored at the end.
+It now stores date by date, one request a second, asks only for each date's home teams, and
+names the date to resume from.
+
+**Unabated's file did not change across three reads in 17 minutes** (same 96,031,477 bytes;
+its `snapshotStartedAtUtc` read 07:52 UTC at 18:55 UTC while the server's Last-Modified read
+19:03). Whether the public file is a delayed copy is not established; the ledger will show it.
+
+### G4. Where it runs
+
+- **Today, by hand:** loops started from the branch on mike's PC from 18:59 UTC; since 20:00 UTC
+  one loop of all twelve feeds (port 47241), until 2026-12-31 or until it is stopped after the
+  merge.
+- **After the merge, the worker reads eleven of the twelve** (G5): the job `nba_feeds`, every
+  minute, around the clock.
+- **The PC keeps two things:** the daily box load, and Unabated's file. The task
+  `BettingModel\NbaFeeds` (`scripts/nba_feeds_run.ps1`, every minute and at sign-in; it leaves
+  at once while a loop holds port 47241) runs master from its own copy. Registering the task
+  was refused by the session's permission check on 2026-11-27; mike registers it after the merge
+  (`docs/local_ops.md`, "NBA feeds"). It runs only while mike is signed in to Windows.
+- **One reader a feed.** The loop and the worker's job both decide what is due from the ledger
+  (anyone's last read), so a feed is not read by both.
+- **The worker:** the official injury report is a step of the 6am run (`nba-injury-report`, the
+  three completed days before the run date; #1523). Which feeds answer from the worker: G5.
+
+### G5. From the Railway worker
+
+The Railway `prop-probe` service, pinned to commit `a1c23849` of this branch with its start
+command set to `python -m data.ingestors.nba_feeds --once --measure /tmp/nba_feeds_probe.json`
+(no database, no key, nothing written), 2026-11-27 19:32 to 19:33 UTC. Its start command was
+put back afterwards; its source stays pinned to this branch, as after the 2026-11-26 probes.
+
+| Feed | Status from the worker | Items |
+|---|---|---|
+| `nba_lineups` | 200 | 132 |
+| `nba_referees` | 200 | 21 |
+| `underdog_news` | 200 | 300 (12 pages) |
+| `sleeper_projections` | 200 | 916 |
+| `pinnacle_nba` | 200 | 1,473 |
+| `unabated_props` | 200, 138,753,649 bytes | 61,755 |
+| `prizepicks_lines` / `prizepicks_counts` | 200 | 10,406 / 1,560 |
+| `underdog_lines` | 200 | 1,380 |
+| `sleeper_lines` / `sleeper_counts` | 200 | 1,440 / 1,264 |
+| `yahoo_mgm_splits` | 200 | 11 |
+
+**Every feed answers from the worker**, the league's lineup file under `stats.nba.com/js/data/`
+included (the `/stats/` endpoints the box loader needs were not probed there and are known to
+refuse it). The probe ran on the probe service, not on the worker itself; they share a project
+and its network, and the worker's own first tick after the merge is the check (rows with
+`origin = 'worker'`). So the capture does not depend on mike's PC: the worker job `nba_feeds`
+(`scheduler.run_nba_feeds`, every minute, 24x7) runs `--tick`, which reads each feed whose own
+interval has passed since its last read by anyone, by the ledger. It leaves out
+`unabated_props`: the worker was served a 139 MB file with 61,755 items where the PC got 96 MB
+and 38,085 at about the same time, and parsing it on the worker would hold about a gigabyte.
+The PC's loop reads that one. Why the two files differ is not established.

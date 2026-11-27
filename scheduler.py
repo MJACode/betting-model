@@ -1185,6 +1185,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # nba_team_total_luck and nba_first_half_total_luck), with
                   # their own fetches.
                   "nba_total_luck_window",
+                  # Stores public NBA feeds change by change: research data, no picks.
+                  "nba_feeds",
                   # Writes NHL picks through the scorer and the NHL cards, and
                   # takes turns with the refresh passes in this process.
                   "nhl_goalie_window",
@@ -2216,6 +2218,28 @@ def _run_models_side_by_side(models: list[list[tuple[str, list[str], float]]]) -
     for done in running:
         outcomes.update(done.result())
     return outcomes
+
+
+NBA_FEEDS_TIMEOUT_S = 300
+# Unabated's prop file is 139 MB from the worker (measured 2026-11-27, 61,755
+# items): parsing it there would hold about a gigabyte. The PC's loop reads it.
+NBA_FEEDS_WORKER_SKIP = "unabated_props"
+
+
+def run_nba_feeds() -> None:
+    """One pass of the public NBA feeds that keep no history (the league's
+    lineup file, referee crews as posted, RotoWire's projections, Underdog's
+    news, Pinnacle's limits, the pick'em boards, BetMGM's splits), each stored
+    change by change (data/ingestors/nba_feeds.py; mike, 2026-11-27). Every
+    minute, 24x7: the lineup file is read each minute and the others when their
+    own interval has passed, by the ledger, so a tick with nothing due is one
+    database read. Free endpoints, no model reads them, nothing is published.
+    All twelve answered 200 from the Railway probe service on 2026-11-27 (same
+    project and egress as this one; this service's own first tick is the check).
+    The origin is passed, not inferred: the ledger's `origin` column is how a
+    read by this job is told from one by the PC."""
+    _run([sys.executable, "-m", "data.ingestors.nba_feeds", "--tick", "--origin", "worker",
+          "--skip", NBA_FEEDS_WORKER_SKIP], "nba-feeds", timeout=NBA_FEEDS_TIMEOUT_S)
 
 
 def run_nba_total_luck_window() -> None:
@@ -3931,6 +3955,19 @@ def build_scheduler() -> BlockingScheduler:
         id="nba_total_luck_window",
         name="NBA totals window (every minute, 24x7: full-game totals 61-66 min, "
              "home team and first-half totals 45-56 min from tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=30,
+    )
+
+    # NBA feeds -- every minute, 24x7 (run_nba_feeds). Research capture only:
+    # no model reads it and nothing is published. Every minute because the
+    # league's lineup file turns Expected into Confirmed inside a few minutes
+    # and that minute is the point of saving it.
+    sched.add_job(
+        run_nba_feeds,
+        CronTrigger(minute="*", timezone=TIMEZONE),
+        id="nba_feeds",
+        name="NBA feeds with no history (every minute, 24x7: lineups, referees, news, "
+             "projections, limits, pick'em boards, splits)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
