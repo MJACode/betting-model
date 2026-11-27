@@ -431,8 +431,12 @@ Neither cell is a bet.
   currently served", so the as-of history was recomputed by today's model, with hindsight in
   the model, not in the data.
 - **Terms:** a personal licence; reproduction and automated copying are prohibited, and so is
-  commercial exploitation "except with our express written permission". Using it inside a paid
-  app's models needs their written permission.
+  commercial exploitation "except with our express written permission". Signal Base charges
+  nothing (mike, 2026-11-27: nothing is set up to charge money), and mike's call is to use the
+  data without asking.
+- **Value to the models: not measured.** Its published accuracy is against an unnamed baseline,
+  not the line. It cannot help `nba_prop_market` or `nba_prop_market_early`, which read prices
+  only. The test that answers it is in the session log for 2026-11-27.
 
 **DraftKings splits for NBA, NHL and NCAAF.** The page answers for each league when asked by
 event group directly: NBA 42648 parsed 5 games, NHL 42133 parsed 7, NCAAF 87637 parsed 10, every
