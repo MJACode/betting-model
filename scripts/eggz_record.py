@@ -15,10 +15,10 @@ command.
     python -m scripts.eggz_record --capper parlaymatt grade --apply
     python -m scripts.eggz_record --capper parlaymatt restate 2026-10-22 --apply
 
-`grade` re-reads stored messages and grades finals. Run it before settle,
-then list the rows still open and settle those. Do not reuse an id from
-before that grade: a needs_review row is deleted and inserted again, so
-its id changes.
+`grade` re-reads stored messages. For Eggz that applies his own marks.
+For ParlayMatt it grades finals. Run it before settle, then list the rows
+still open and settle those. Do not reuse an id from before that grade:
+a needs_review row is deleted and inserted again, so its id changes.
 
 `restate` needs mike's approval (config.RECORD_RESTATEMENT_APPROVALS) and then
 posts one Corrected recap for a day that already has a sent
