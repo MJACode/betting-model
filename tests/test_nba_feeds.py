@@ -145,8 +145,8 @@ def test_a_failed_read_writes_its_ledger_row_and_nothing_else():
     latest = {"0022600064:1": "h"}
     read = nf.Read(403, 10, {}, error="HTTP 403")
     n = nf.store(conn, feed, "pc", datetime(2026, 11, 27, tzinfo=timezone.utc), read, latest)
-    assert n == 0 and conn.many == []                 # no "gone" rows from an error
-    (sql, params), = conn.one
+    (sql, params), = conn.one                         # the ledger row and nothing else:
+    assert n == 0                                     # no "gone" rows from an error
     assert nf.FETCHES in sql and params[3] == 403 and params[-1] == "HTTP 403"
 
 
@@ -156,8 +156,18 @@ def test_a_good_read_writes_changes_latest_and_ledger_in_one_commit():
     read = nf.Read(200, 10, {"nba:1": {"crew": [["A", 1]]}})
     n = nf.store(conn, feed, "pc", datetime(2026, 11, 27, tzinfo=timezone.utc), read, {})
     assert n == 1 and conn.commits == 1
-    assert nf.CHANGES in conn.many[0][0] and nf.LATEST in conn.many[1][0]
-    assert conn.one[0][1][6] == 1                     # the ledger's changed count
+    assert nf.CHANGES in conn.one[0][0] and nf.LATEST in conn.one[1][0]
+    assert nf.FETCHES in conn.one[2][0] and conn.one[2][1][6] == 1    # the ledger's changed count
+
+
+def test_a_big_first_read_goes_in_batches_not_a_round_trip_a_row():
+    conn = _Conn()
+    feed = nf.FEEDS["unabated_props"]
+    read = nf.Read(200, 10, {f"k{i}": {"v": i} for i in range(1201)})
+    nf.store(conn, feed, "pc", datetime(2026, 11, 27, tzinfo=timezone.utc), read, {})
+    changes = [sql for sql, _p in conn.one if nf.CHANGES in sql]
+    assert len(changes) == 3 and len(conn.one) == 7       # 3 + 3 batches and the ledger row
+    assert sum(len(p) for sql, p in conn.one if nf.CHANGES in sql) == 1201 * 6
 
 
 def test_news_stops_at_the_first_page_holding_a_known_item(monkeypatch):
@@ -199,3 +209,202 @@ def test_one_read_turns_an_exception_into_a_ledger_error(monkeypatch):
 @pytest.mark.parametrize("name", sorted(nf.FEEDS))
 def test_every_feed_names_a_cadence(name):
     assert nf.FEEDS[name].every_sec(datetime(2026, 11, 27, 14, 0, tzinfo=timezone.utc)) >= 60
+
+
+# ---- the market feeds
+
+NOW = datetime(2026, 11, 27, 19, 0, tzinfo=timezone.utc)
+
+
+def _pin(live=False, start="2026-11-28T02:10:00Z", limit=250, price=-130):
+    matchups = [{"id": 10, "type": "special", "isLive": live,
+                 "special": {"category": "Player Props", "description": "LeBron James (Points)"},
+                 "parent": {"id": 1, "isLive": live, "startTime": start,
+                            "participants": [{"alignment": "home", "name": "Phoenix Suns"},
+                                             {"alignment": "away", "name": "Dallas Mavericks"}]},
+                 "participants": [{"id": 11, "name": "Over"}, {"id": 12, "name": "Under"}]}]
+    markets = [{"matchupId": 10, "key": "s;0;ou", "type": "total", "period": 0,
+                "limits": [{"amount": limit, "type": "maxRiskStake"}],
+                "prices": [{"participantId": 11, "points": 9.5, "price": price},
+                           {"participantId": 12, "points": 9.5, "price": -102}]}]
+    return matchups, markets
+
+
+def test_pinnacle_keeps_the_limit_and_names_the_prop():
+    item = nf.parse_pinnacle(*_pin(), NOW)["10:s;0;ou"]
+    assert item["limit"] == 250 and item["what"] == "LeBron James (Points)"
+    assert item["prices"][0] == {"side": "Over", "points": 9.5, "price": -130}
+    assert item["home"] == "Phoenix Suns"
+
+
+def test_a_limit_move_alone_is_a_change():
+    a = nf.parse_pinnacle(*_pin(limit=250), NOW)["10:s;0;ou"]
+    b = nf.parse_pinnacle(*_pin(limit=500), NOW)["10:s;0;ou"]
+    assert nf.state_hash(a) != nf.state_hash(b)
+
+
+def test_pinnacle_leaves_out_in_play_and_started_games():
+    assert nf.parse_pinnacle(*_pin(live=True), NOW) == {}
+    assert nf.parse_pinnacle(*_pin(start="2026-11-27T18:00:00Z"), NOW) == {}
+
+
+def _unabated(price=-175, modified="2026-11-27T05:06:13", start="2026-11-28T02:30:00"):
+    return {"marketSources": [{"id": 27, "name": "Bookmaker"}],
+            "people": {"42951": {"firstName": "Matisse", "lastName": "Thybulle"}},
+            "odds": {"lg3:pt1:pregame": [{
+                "personId": 42951, "eventId": 134394, "eventStart": start, "betTypeId": 69,
+                "eventName": "LAL @ SAS",
+                "sides": {"si1:pid42951": {"ms27": {
+                    "points": 1.5, "price": price, "openerPoints": 1.5, "openerPrice": -165,
+                    "statusId": 1, "modifiedOn": modified,
+                    "alternateLines": [{"points": 0.5, "price": 239}]}}}}]}}
+
+
+def test_unabated_keeps_the_opener_and_names_source_and_player():
+    item = nf.parse_unabated(_unabated(), NOW)["134394:42951:69:si1:ms27"]
+    assert (item["source"], item["player"]) == ("Bookmaker", "Matisse Thybulle")
+    assert (item["opener_points"], item["opener_price"], item["price"]) == (1.5, -165, -175)
+    assert "alternateLines" not in item
+
+
+def test_unabated_change_is_the_price_not_the_feeds_stamp():
+    a = nf.parse_unabated(_unabated(), NOW)["134394:42951:69:si1:ms27"]
+    restamp = nf.parse_unabated(_unabated(modified="2026-11-27T06:00:00"), NOW)["134394:42951:69:si1:ms27"]
+    moved = nf.parse_unabated(_unabated(price=-180), NOW)["134394:42951:69:si1:ms27"]
+    assert nf.state_hash(a) == nf.state_hash(restamp) != nf.state_hash(moved)
+
+
+def test_unabated_leaves_out_a_started_game():
+    assert nf.parse_unabated(_unabated(start="2026-11-27T18:00:00"), NOW) == {}
+
+
+def _pp(count=0, line=24.5, status="pre_game"):
+    return {"included": [{"type": "new_player", "id": "p1",
+                          "attributes": {"display_name": "Jalen Brunson", "team": "NYK"}}],
+            "data": [{"id": "17", "attributes": {
+                "status": status, "stat_type": "Points", "line_score": line, "odds_type": "standard",
+                "start_time": "2026-11-27T19:00:00-05:00", "trending_count": count,
+                "updated_at": "x"},
+                "relationships": {"new_player": {"data": {"type": "new_player", "id": "p1"}}}}]}
+
+
+def test_prizepicks_a_pick_count_ticking_up_is_not_a_line_change():
+    l1, c1 = nf.parse_prizepicks(_pp(count=100))
+    l2, c2 = nf.parse_prizepicks(_pp(count=180))
+    assert nf.state_hash(l1["17"]) == nf.state_hash(l2["17"])
+    assert nf.state_hash(c1["17"]) != nf.state_hash(c2["17"])
+    assert l1["17"]["player"] == "Jalen Brunson" and c2["17"]["trending_count"] == 180
+
+
+def test_prizepicks_no_count_no_popularity_item_and_live_lines_left_out():
+    lines, counts = nf.parse_prizepicks(_pp(count=0))
+    assert "17" in lines and counts == {}
+    assert nf.parse_prizepicks(_pp(status="in_game")) == ({}, {})
+
+
+def _ud(sport="NBA", payout="1.14"):
+    return {"games": [{"id": 5, "sport_id": sport, "abbreviated_title": "PHI @ IND",
+                       "scheduled_at": "2026-11-28T00:30:00Z", "status": "scheduled"}],
+            "appearances": [{"id": "a1", "match_id": 5, "player_id": "pl"}],
+            "players": [{"id": "pl", "first_name": "LeBron", "last_name": "James"}],
+            "over_under_lines": [{"id": "L1", "stat_value": "17.5", "line_type": "balanced",
+                                  "status": "active", "live_event": False, "updated_at": "t",
+                                  "over_under": {"appearance_stat": {"appearance_id": "a1", "stat": "points"}},
+                                  "options": [{"choice": "lower", "american_price": "-167",
+                                               "decimal_price": "1.6", "payout_multiplier": "0.81"},
+                                              {"choice": "higher", "american_price": "+135",
+                                               "decimal_price": "2.35", "payout_multiplier": payout}]}]}
+
+
+def test_underdog_keeps_nba_lines_only_with_each_sides_payout():
+    item = nf.parse_underdog_lines(_ud())["L1"]
+    assert item["player"] == "LeBron James" and item["line"] == "17.5"
+    assert [o["choice"] for o in item["options"]] == ["higher", "lower"]
+    assert nf.parse_underdog_lines(_ud(sport="NFL")) == {}
+    assert nf.state_hash(item) != nf.state_hash(nf.parse_underdog_lines(_ud(payout="1.20"))["L1"])
+
+
+def _sl(over=85, status="pre_game", payout="1.72"):
+    opt = lambda side, mult: {"outcome": side, "outcome_value": 1.5, "payout_multiplier": mult,
+                              "status": "active", "subject_team": "MIA"}
+    return [{"sport": "nba", "game_status": status, "game_id": "g", "subject_id": "1081",
+             "market_type": "assists_over_under_player_1081", "wager_type": "assists",
+             "line_type": "normal", "status": "active", "updated_at": 1,
+             "options": [opt("over", payout), opt("under", "1.85")],
+             "pick_stats": {"counts": {"over": over, "under": 2, "total": over + 2}}}]
+
+
+def test_sleeper_lines_and_pick_counts_are_separate_items():
+    l1, c1 = nf.parse_sleeper_lines(_sl(over=85))
+    l2, c2 = nf.parse_sleeper_lines(_sl(over=120))
+    key = "g:assists_over_under_player_1081:normal"
+    assert nf.state_hash(l1[key]) == nf.state_hash(l2[key])
+    assert c1[key]["over"] == 85 and c2[key]["total"] == 122
+    assert nf.state_hash(l1[key]) != nf.state_hash(nf.parse_sleeper_lines(_sl(payout="1.60"))[0][key])
+    assert nf.parse_sleeper_lines(_sl(status="in_game")) == ({}, {})
+
+
+def test_yahoo_keeps_money_and_bets_shares_per_option():
+    g = {"gameId": "nba.g.2026112718", "status": "PREGAME", "startTime": "2026-11-27T16:00:00-08:00",
+         "homeTeam": {"abbreviation": "NY"}, "awayTeam": {"abbreviation": "MIA"},
+         "gameOddsSummary": {"pregameOddsDisplay": "-2.5, O/U 222.5"},
+         "gameLineSixPack": [{"type": "OVER_UNDER", "period": "FULL_GAME", "status": "AVAILABLE",
+                              "options": [{"name": "Over 222.5", "americanOdds": -108,
+                                           "stakePercentage": "78.39", "wagerPercentage": "83.19",
+                                           "isCorrect": None}]}]}
+    item = nf.parse_yahoo_game(g)
+    opt = item["markets"][0]["options"][0]
+    assert (opt["money_pct"], opt["bets_pct"], opt["price"]) == ("78.39", "83.19", -108)
+    assert item["home"] == "NY" and item["status"] == "PREGAME"
+
+
+def test_yahoo_has_a_code_for_every_team_and_no_code_twice():
+    assert len(nf.YAHOO_TEAM_CODE) == 30 == len(set(nf.YAHOO_TEAM_CODE.values()))
+    assert nf.YAHOO_TEAM_CODE["NYK"] == "18"          # nba.g.2026112718 was MIA at NYK
+
+
+def test_a_yahoo_backfill_refused_part_way_keeps_what_it_read(monkeypatch):
+    calls = []
+
+    def fake_date(d, codes):
+        calls.append(d)
+        if d == date(2026, 10, 22):
+            raise ConnectionError("refused")
+        return {f"nba.g.{d:%Y%m%d}18": {"game": "x", "markets": []}}, 10, None
+
+    monkeypatch.setattr(nf, "read_yahoo_date", fake_date)
+    monkeypatch.setattr(nf, "_home_codes", lambda d: ["18"])
+    monkeypatch.setattr(nf, "load_latest", lambda conn, feed: {})
+    monkeypatch.setattr(nf.time, "sleep", lambda s: None)
+    conn = _Conn()
+    res = nf.backfill_yahoo(conn, "pc", date(2026, 10, 20), date(2026, 10, 25))
+    assert res["games"] == 2 and res["resume_from"] == "2026-10-22"
+    assert calls == [date(2026, 10, 20), date(2026, 10, 21), date(2026, 10, 22)]
+    assert conn.commits == 3                              # two stored dates and the failed one's ledger row
+
+
+def test_the_daily_injury_report_step_asks_for_completed_days_only(monkeypatch):
+    import run_pipeline
+    from data.ingestors import nba_injury_report
+    asked = {}
+    monkeypatch.setattr(nba_injury_report, "run_dates",
+                        lambda dates, label="run", dedupe=True: asked.update(dates=dates) or {"dates": len(dates)})
+    assert run_pipeline.step_nba_injury_report("2026-11-27") is True
+    assert asked["dates"] == [date(2026, 11, 24), date(2026, 11, 25), date(2026, 11, 26)]
+
+
+def test_the_injury_report_step_is_in_the_morning_run_and_callable_by_name():
+    import pathlib
+    src = pathlib.Path("run_pipeline.py").read_text(encoding="utf-8")
+    assert '"nba-injury-report", lambda: step_nba_injury_report(run_date), run_date)' in src
+    assert '"nba-injury-report": lambda: step_nba_injury_report(run_date)' in src
+
+
+def test_a_failing_injury_report_step_reports_false_not_an_exception(monkeypatch):
+    import run_pipeline
+    from data.ingestors import nba_injury_report
+
+    def boom(*a, **k):
+        raise RuntimeError("403")
+    monkeypatch.setattr(nba_injury_report, "run_dates", boom)
+    assert run_pipeline.step_nba_injury_report("2026-11-27") is False

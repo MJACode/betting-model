@@ -355,6 +355,324 @@ def read_sleeper_projections(now: datetime | None = None) -> Read:
     return Read(200, nbytes, items, expires_at=et_now(now) + timedelta(days=9))
 
 
+# -- Pinnacle's own NBA board: every pre-game market with its stake limit
+
+PINNACLE_BASE = "https://guest.api.arcadia.pinnacle.com/0.1/leagues/487"
+
+
+def parse_pinnacle(matchups: list, markets: list, now: datetime) -> dict[str, dict]:
+    """Pre-game markets only (an in-play price moves every few seconds and is
+    not what this is for). Player props are Pinnacle's "special" matchups: the
+    player and stat are in the special's description, the game in its parent."""
+    info: dict[int, dict] = {}
+    for m in matchups or []:
+        parent = m.get("parent") or {}
+        start = parent.get("startTime") or m.get("startTime")
+        live = bool(m.get("isLive") or parent.get("isLive"))
+        teams = {p.get("alignment"): p.get("name")
+                 for p in (parent.get("participants") or m.get("participants") or [])}
+        sp = m.get("special") or {}
+        info[m.get("id")] = {
+            "start": start, "live": live, "kind": m.get("type"),
+            "home": teams.get("home"), "away": teams.get("away"),
+            "what": sp.get("description"), "category": sp.get("category"),
+            "names": {p.get("id"): p.get("name") for p in m.get("participants") or []},
+        }
+    items: dict[str, dict] = {}
+    for x in markets or []:
+        mi = info.get(x.get("matchupId"))
+        if not mi or mi["live"]:
+            continue
+        try:
+            if mi["start"] and datetime.fromisoformat(mi["start"].replace("Z", "+00:00")) <= now:
+                continue
+        except ValueError:
+            pass
+        prices = [{"side": pr.get("designation") or mi["names"].get(pr.get("participantId")),
+                   "points": pr.get("points"), "price": pr.get("price")}
+                  for pr in x.get("prices") or []]
+        limit = next((li.get("amount") for li in x.get("limits") or []
+                      if li.get("type") == "maxRiskStake"), None)
+        items[f"{x.get('matchupId')}:{x.get('key')}"] = {
+            "type": x.get("type"), "period": x.get("period"), "prices": prices, "limit": limit,
+            "kind": mi["kind"], "what": mi["what"], "category": mi["category"],
+            "home": mi["home"], "away": mi["away"], "start": mi["start"],
+        }
+    return items
+
+
+def read_pinnacle(now: datetime | None = None) -> Read:
+    now = now or datetime.now(timezone.utc)
+    mu = _get(f"{PINNACLE_BASE}/matchups")
+    if mu.status_code != 200:
+        return Read(mu.status_code, len(mu.content), {}, error=f"matchups: HTTP {mu.status_code}")
+    mk = _get(f"{PINNACLE_BASE}/markets/straight")
+    nbytes = len(mu.content) + len(mk.content)
+    if mk.status_code != 200:
+        return Read(mk.status_code, nbytes, {}, error=f"markets: HTTP {mk.status_code}")
+    return Read(200, nbytes, parse_pinnacle(mu.json(), mk.json(), now),
+                expires_at=now + timedelta(days=3))
+
+
+# -- Unabated's public prop file: each source's line, price and OPENING line and price
+
+UNABATED_URL = "https://content.unabated.com/markets/v2/league/3/propodds.json"
+
+
+def parse_unabated(payload: dict, now: datetime) -> dict[str, dict]:
+    """One item per (event, player, bet type, side, source). Sources and
+    players are named from the file's own tables. Games already started are
+    left out. Alternate ladders are not stored (14,871 of 45,087 items carried
+    one on 2026-11-27; the main line and the opener are what this is for)."""
+    sources = {f"ms{m.get('id')}": m.get("name") for m in payload.get("marketSources") or []}
+    people = payload.get("people") or {}
+    items: dict[str, dict] = {}
+    for group, records in (payload.get("odds") or {}).items():
+        if "pregame" not in group:
+            continue
+        for o in records or []:
+            start = o.get("eventStart")
+            try:
+                if start and datetime.fromisoformat(start).replace(tzinfo=timezone.utc) <= now:
+                    continue
+            except ValueError:
+                pass
+            who = people.get(str(o.get("personId"))) or {}
+            name = " ".join(v for v in (who.get("firstName"), who.get("lastName")) if v)
+            for side_key, by_source in (o.get("sides") or {}).items():
+                side = side_key.split(":")[0]
+                for ms, v in (by_source or {}).items():
+                    items[f"{o.get('eventId')}:{o.get('personId')}:{o.get('betTypeId')}:{side}:{ms}"] = {
+                        "event": o.get("eventId"), "event_name": o.get("eventName"), "start": start,
+                        "player": name, "bet_type": o.get("betTypeId"), "side": side,
+                        "source": sources.get(ms, ms), "points": v.get("points"),
+                        "price": v.get("price"), "opener_points": v.get("openerPoints"),
+                        "opener_price": v.get("openerPrice"), "status": v.get("statusId"),
+                        "_modified_on": v.get("modifiedOn"),
+                    }
+    return items
+
+
+_unabated_snapshot: dict = {"stamp": None}
+
+
+def read_unabated(now: datetime | None = None) -> Read:
+    now = now or datetime.now(timezone.utc)
+    r = _get(UNABATED_URL, timeout=180)
+    if r.status_code != 200:
+        return Read(r.status_code, len(r.content), {}, error=f"HTTP {r.status_code}")
+    body = r.json()
+    items = parse_unabated(body, now)
+    for it in items.values():
+        it["_file_snapshot"] = body.get("snapshotStartedAtUtc")
+    return Read(200, len(r.content), items, expires_at=now + timedelta(days=3))
+
+
+# -- the pick'em boards: each app's line and payout, and how many picked each side
+
+PRIZEPICKS_URL = "https://partner-api.prizepicks.com/projections"
+UNDERDOG_LINES_URL = "https://api.underdogfantasy.com/v1/over_under_lines"
+SLEEPER_LINES_URL = "https://api.sleeper.app/lines/available"
+
+
+def parse_prizepicks(payload: dict) -> tuple[dict[str, dict], dict[str, dict]]:
+    """(lines, popularity). A line's item is its number and type; the pick
+    count lives in its own feed so that a count ticking up is not a line row."""
+    players = {x.get("id"): x.get("attributes") or {} for x in payload.get("included") or []
+               if x.get("type") == "new_player"}
+    lines, counts = {}, {}
+    for x in payload.get("data") or []:
+        a = x.get("attributes") or {}
+        if a.get("status") != "pre_game":
+            continue
+        pid = (((x.get("relationships") or {}).get("new_player") or {}).get("data") or {}).get("id")
+        who = players.get(pid) or {}
+        lines[str(x.get("id"))] = {
+            "player": who.get("display_name") or who.get("name"), "team": who.get("team"),
+            "stat": a.get("stat_type"), "line": a.get("line_score"), "odds_type": a.get("odds_type"),
+            "start": a.get("start_time"), "promo": bool(a.get("is_promo")),
+            "flash_line": a.get("flash_sale_line_score"), "adjusted_odds": a.get("adjusted_odds"),
+            "_updated_at": a.get("updated_at"), "_board_time": a.get("board_time"),
+        }
+        if a.get("trending_count"):
+            counts[str(x.get("id"))] = {
+                "player": who.get("display_name") or who.get("name"), "stat": a.get("stat_type"),
+                "line": a.get("line_score"), "odds_type": a.get("odds_type"),
+                "trending_count": a.get("trending_count"),
+            }
+    return lines, counts
+
+
+def _prizepicks(now=None) -> tuple[Read, Read]:
+    r = _get(PRIZEPICKS_URL, timeout=120, league_id=7, per_page=10000)
+    if r.status_code != 200:
+        bad = Read(r.status_code, len(r.content), {}, error=f"HTTP {r.status_code}")
+        return bad, bad
+    lines, counts = parse_prizepicks(r.json())
+    exp = (now or datetime.now(timezone.utc)) + timedelta(days=3)
+    return Read(200, len(r.content), lines, expires_at=exp), Read(200, len(r.content), counts, expires_at=exp)
+
+
+def read_prizepicks(now: datetime | None = None) -> Read:
+    return _prizepicks(now)[0]
+
+
+def read_prizepicks_counts(now: datetime | None = None) -> Read:
+    return _prizepicks(now)[1]
+
+
+def parse_underdog_lines(payload: dict) -> dict[str, dict]:
+    """NBA lines only (the file holds every sport): a line belongs to an
+    appearance, an appearance to a match, and a match names its sport."""
+    nba = {g.get("id"): g for g in payload.get("games") or [] if g.get("sport_id") == "NBA"}
+    app = {a.get("id"): a for a in payload.get("appearances") or []}
+    players = {p.get("id"): p for p in payload.get("players") or []}
+    items = {}
+    for ln in payload.get("over_under_lines") or []:
+        ou = ln.get("over_under") or {}
+        st = ou.get("appearance_stat") or {}
+        a = app.get(st.get("appearance_id")) or {}
+        g = nba.get(a.get("match_id"))
+        if not g or ln.get("live_event") or g.get("status") not in (None, "scheduled"):
+            continue
+        p = players.get(a.get("player_id")) or {}
+        items[str(ln.get("id"))] = {
+            "player": " ".join(v for v in (p.get("first_name"), p.get("last_name")) if v),
+            "game": g.get("abbreviated_title"), "start": g.get("scheduled_at"),
+            "stat": st.get("stat"), "line": ln.get("stat_value"), "line_type": ln.get("line_type"),
+            "status": ln.get("status"),
+            "options": sorted(
+                [{"choice": o.get("choice"), "american": o.get("american_price"),
+                  "decimal": o.get("decimal_price"), "payout": o.get("payout_multiplier"),
+                  "status": o.get("status")} for o in ln.get("options") or []],
+                key=lambda o: str(o["choice"])),
+            "_updated_at": ln.get("updated_at"),
+        }
+    return items
+
+
+def read_underdog_lines(now: datetime | None = None) -> Read:
+    r = _get(UNDERDOG_LINES_URL, timeout=180)
+    if r.status_code != 200:
+        return Read(r.status_code, len(r.content), {}, error=f"HTTP {r.status_code}")
+    return Read(200, len(r.content), parse_underdog_lines(r.json()),
+                expires_at=(now or datetime.now(timezone.utc)) + timedelta(days=3))
+
+
+def parse_sleeper_lines(payload: list) -> tuple[dict[str, dict], dict[str, dict]]:
+    """(lines, pick counts), pre-game only."""
+    lines, counts = {}, {}
+    for x in payload or []:
+        if x.get("sport") != "nba" or x.get("game_status") != "pre_game":
+            continue
+        opts = sorted(
+            [{"outcome": o.get("outcome"), "value": o.get("outcome_value"),
+              "payout": o.get("payout_multiplier"), "status": o.get("status")}
+             for o in x.get("options") or []], key=lambda o: str(o["outcome"]))
+        value = opts[0]["value"] if opts else None
+        key = f"{x.get('game_id')}:{x.get('market_type')}:{x.get('line_type')}"
+        if x.get("line_type") != "normal":
+            key += f":{value}"
+        team = next((o.get("subject_team") for o in x.get("options") or []), None)
+        lines[key] = {"subject": x.get("subject_id"), "team": team, "stat": x.get("wager_type"),
+                      "line_type": x.get("line_type"), "status": x.get("status"), "options": opts,
+                      "_updated_at": x.get("updated_at")}
+        c = (x.get("pick_stats") or {}).get("counts")
+        if c and c.get("total"):
+            counts[key] = {"subject": x.get("subject_id"), "stat": x.get("wager_type"),
+                           "value": value, "over": c.get("over"), "under": c.get("under"),
+                           "total": c.get("total")}
+    return lines, counts
+
+
+def _sleeper_lines(now=None) -> tuple[Read, Read]:
+    r = _get(SLEEPER_LINES_URL + "?sports[]=nba", timeout=120)
+    if r.status_code != 200:
+        bad = Read(r.status_code, len(r.content), {}, error=f"HTTP {r.status_code}")
+        return bad, bad
+    lines, counts = parse_sleeper_lines(r.json())
+    exp = (now or datetime.now(timezone.utc)) + timedelta(days=3)
+    return Read(200, len(r.content), lines, expires_at=exp), Read(200, len(r.content), counts, expires_at=exp)
+
+
+def read_sleeper_lines(now: datetime | None = None) -> Read:
+    return _sleeper_lines(now)[0]
+
+
+def read_sleeper_counts(now: datetime | None = None) -> Read:
+    return _sleeper_lines(now)[1]
+
+
+# -- BetMGM's bet % and money % per game, as Yahoo Sports serves them
+
+YAHOO_ODDS_URL = "https://graphite.sports.yahoo.com/v1/query/shangrila/gameOdds"
+# Yahoo's game id is nba.g.<YYYYMMDD><home team's two digits>; one id a call (two ids in one
+# call answer 400, an id with no game answers an empty list: measured 2026-11-27).
+YAHOO_TEAM_CODE = {
+    "ATL": "01", "BOS": "02", "NOP": "03", "CHI": "04", "CLE": "05", "DAL": "06", "DEN": "07",
+    "DET": "08", "GSW": "09", "HOU": "10", "IND": "11", "LAC": "12", "LAL": "13", "MIA": "14",
+    "MIL": "15", "MIN": "16", "BKN": "17", "NYK": "18", "ORL": "19", "PHI": "20", "PHX": "21",
+    "POR": "22", "SAC": "23", "SAS": "24", "OKC": "25", "UTA": "26", "WAS": "27", "TOR": "28",
+    "MEM": "29", "CHA": "30",
+}
+
+
+def parse_yahoo_game(g: dict) -> dict:
+    markets = []
+    for m in g.get("gameLineSixPack") or []:
+        markets.append({
+            "type": m.get("type"), "period": m.get("period"), "status": m.get("status"),
+            "options": [{"name": o.get("name"), "price": o.get("americanOdds"),
+                         "money_pct": o.get("stakePercentage"), "bets_pct": o.get("wagerPercentage"),
+                         "won": o.get("isCorrect")} for o in m.get("options") or []],
+        })
+    return {"game": g.get("gameId"), "status": g.get("status"), "start": g.get("startTime"),
+            "home": (g.get("homeTeam") or {}).get("abbreviation"),
+            "away": (g.get("awayTeam") or {}).get("abbreviation"),
+            "summary": (g.get("gameOddsSummary") or {}).get("pregameOddsDisplay"),
+            "markets": sorted(markets, key=lambda m: str(m["type"]))}
+
+
+def read_yahoo_date(d: date, codes: list[str]) -> tuple[dict[str, dict], int, str | None]:
+    items, nbytes = {}, 0
+    for code in codes:
+        gid = f"nba.g.{d.strftime('%Y%m%d')}{code}"
+        r = _get(YAHOO_ODDS_URL, gameIds=gid)
+        nbytes += len(r.content)
+        if r.status_code != 200:
+            return items, nbytes, f"{gid}: HTTP {r.status_code}"
+        for g in ((r.json().get("data") or {}).get("games") or []):
+            items[g.get("gameId")] = parse_yahoo_game(g)
+        time.sleep(1.0)
+    return items, nbytes, None
+
+
+def _home_codes(d: date) -> list[str]:
+    """The home teams of a date from the league's lineup file; every team when
+    it does not answer or lists nothing (30 calls then, not about 10)."""
+    try:
+        r = _get(LINEUPS_URL.format(d=d.strftime("%Y%m%d")))
+        homes = [(g.get("homeTeam") or {}).get("teamAbbreviation") for g in r.json().get("games") or []]
+        codes = [YAHOO_TEAM_CODE[h] for h in homes if h in YAHOO_TEAM_CODE]
+        if codes:
+            return codes
+    except Exception:                                           # noqa: BLE001
+        pass
+    return sorted(YAHOO_TEAM_CODE.values())
+
+
+def read_yahoo_splits(now: datetime | None = None) -> Read:
+    items: dict[str, dict] = {}
+    nbytes = 0
+    for d in slate_dates(now):
+        got, n, err = read_yahoo_date(d, _home_codes(d))
+        nbytes += n
+        if err:
+            return Read(None, nbytes, {}, error=err)
+        items.update(got)
+    return Read(200, nbytes, items, expires_at=et_now(now) + timedelta(days=3))
+
+
 @dataclass
 class Feed:
     name: str
@@ -378,6 +696,14 @@ FEEDS: dict[str, Feed] = {f.name: f for f in (
     Feed("nba_referees", read_referees, _referees_every),
     Feed("underdog_news", read_news, lambda now: 120, wants_known=True),
     Feed("sleeper_projections", read_sleeper_projections, lambda now: 600),
+    Feed("pinnacle_nba", read_pinnacle, lambda now: 300, lists_everything=True),
+    Feed("unabated_props", read_unabated, lambda now: 900),
+    Feed("prizepicks_lines", read_prizepicks, lambda now: 600, lists_everything=True),
+    Feed("prizepicks_counts", read_prizepicks_counts, lambda now: 3600),
+    Feed("underdog_lines", read_underdog_lines, lambda now: 900, lists_everything=True),
+    Feed("sleeper_lines", read_sleeper_lines, lambda now: 600, lists_everything=True),
+    Feed("sleeper_counts", read_sleeper_counts, lambda now: 3600),
+    Feed("yahoo_mgm_splits", read_yahoo_splits, lambda now: 600),
 )}
 
 
@@ -394,14 +720,25 @@ def load_latest(conn, feed: str) -> dict[str, str]:
     return {r[0]: r[1] for r in rows}
 
 
-_CHANGE_INSERT = (f"INSERT INTO {CHANGES} (feed, item_key, seen_at, state_hash, state, origin) "
-                  "VALUES (%s, %s, %s, %s, %s::jsonb, %s) ON CONFLICT DO NOTHING")
-_LATEST_UPSERT = (f"INSERT INTO {LATEST} (feed, item_key, state_hash, seen_at, expires_at) "
-                  "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (feed, item_key) DO UPDATE SET "
-                  "state_hash = EXCLUDED.state_hash, seen_at = EXCLUDED.seen_at, "
-                  "expires_at = EXCLUDED.expires_at")
+_CHANGE_HEAD = f"INSERT INTO {CHANGES} (feed, item_key, seen_at, state_hash, state, origin) VALUES "
+_CHANGE_ROW = "(%s, %s, %s, %s, %s::jsonb, %s)"
+_CHANGE_TAIL = " ON CONFLICT DO NOTHING"
+_LATEST_HEAD = f"INSERT INTO {LATEST} (feed, item_key, state_hash, seen_at, expires_at) VALUES "
+_LATEST_ROW = "(%s, %s, %s, %s, %s)"
+_LATEST_TAIL = (" ON CONFLICT (feed, item_key) DO UPDATE SET state_hash = EXCLUDED.state_hash, "
+                "seen_at = EXCLUDED.seen_at, expires_at = EXCLUDED.expires_at")
 _FETCH_INSERT = (f"INSERT INTO {FETCHES} (feed, origin, fetched_at, http_status, bytes, items, "
                  "changed, error) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)")
+BATCH = 500
+
+
+def _insert_many(conn, head: str, row: str, tail: str, rows: list[tuple]) -> None:
+    """Multi-row inserts, BATCH rows a statement: a first read of a big board is
+    tens of thousands of rows, and one round trip a row would take half an hour."""
+    for i in range(0, len(rows), BATCH):
+        chunk = rows[i:i + BATCH]
+        conn.execute(head + ", ".join([row] * len(chunk)) + tail,
+                     tuple(v for r in chunk for v in r))
 
 
 def store(conn, feed: Feed, origin: str, seen_at: datetime, read: Read,
@@ -412,10 +749,11 @@ def store(conn, feed: Feed, origin: str, seen_at: datetime, read: Read,
     stamp = seen_at.isoformat()
     exp = read.expires_at.isoformat() if read.expires_at else None
     if changes:
-        conn.executemany(_CHANGE_INSERT, [
+        _insert_many(conn, _CHANGE_HEAD, _CHANGE_ROW, _CHANGE_TAIL, [
             (feed.name, k, stamp, h, json.dumps(s, ensure_ascii=False), origin)
             for k, s, h in changes])
-        conn.executemany(_LATEST_UPSERT, [(feed.name, k, h, stamp, exp) for k, s, h in changes])
+        _insert_many(conn, _LATEST_HEAD, _LATEST_ROW, _LATEST_TAIL,
+                     [(feed.name, k, h, stamp, exp) for k, s, h in changes])
     conn.execute(_FETCH_INSERT, (feed.name, origin, stamp, read.status, read.nbytes,
                                  len(read.items), len(changes), read.error))
     conn.commit()
@@ -453,6 +791,32 @@ def backfill_news(conn, origin: str, max_pages: int = 400) -> dict:
     return {"feed": feed.name, "items": len(read.items), "changed": n, "error": read.error}
 
 
+def backfill_yahoo(conn, origin: str, first: date, last: date, pause: float = 1.0) -> dict:
+    """Every game Yahoo still fills between two dates (it empties a season's
+    games some months after they are played). Stored date by date, so a refusal
+    part-way keeps what was read; the result names the date to resume from.
+    Yahoo refused the connection after about 650 requests at four a second
+    (2026-11-27), so this asks only for each date's home teams, one a second."""
+    feed = FEEDS["yahoo_mgm_splits"]
+    games = changed = 0
+    d = first
+    while d <= last:
+        try:
+            got, nbytes, err = read_yahoo_date(d, _home_codes(d))
+        except Exception as exc:                                # noqa: BLE001
+            got, nbytes, err = {}, 0, f"{type(exc).__name__}: {str(exc)[:200]}"
+        seen_at = datetime.now(timezone.utc).replace(microsecond=0)
+        read = Read(None if err else 200, nbytes, got, error=err)
+        changed += store(conn, feed, origin, seen_at, read, load_latest(conn, feed.name))
+        if err:
+            return {"feed": feed.name, "games": games, "changed": changed,
+                    "resume_from": d.isoformat(), "error": err}
+        games += len(got)
+        d += timedelta(days=1)
+        time.sleep(pause)
+    return {"feed": feed.name, "games": games, "changed": changed, "error": None}
+
+
 def default_origin() -> str:
     return "worker" if os.environ.get("RAILWAY_ENVIRONMENT") else "pc"
 
@@ -466,6 +830,10 @@ def main(argv=None) -> int:
     ap.add_argument("--origin", default=default_origin())
     ap.add_argument("--measure", help="keep state in this JSON file; write no database")
     ap.add_argument("--backfill-news", action="store_true")
+    ap.add_argument("--backfill-yahoo", nargs=2, metavar=("FIRST", "LAST"),
+                    help="BetMGM splits for every game of these dates (YYYY-MM-DD)")
+    ap.add_argument("--port", type=int, default=LOOP_PORT,
+                    help="with --loop: the local port that marks this loop as running")
     a = ap.parse_args(argv)
     names = a.feeds.split(",") if a.feeds else list(FEEDS)
     unknown = [n for n in names if n not in FEEDS]
@@ -486,15 +854,19 @@ def main(argv=None) -> int:
         if a.backfill_news:
             print(json.dumps(backfill_news(conn, a.origin)))
             return 0
+        if a.backfill_yahoo:
+            print(json.dumps(backfill_yahoo(conn, a.origin, date.fromisoformat(a.backfill_yahoo[0]),
+                                            date.fromisoformat(a.backfill_yahoo[1]))))
+            return 0
         if not a.loop:
             for f in feeds:
                 print(json.dumps(one_read(conn, f, a.origin, measure=measure)))
             return 0
         guard = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            guard.bind(("127.0.0.1", LOOP_PORT))
+            guard.bind(("127.0.0.1", a.port))
         except OSError:
-            print(json.dumps({"already_running": LOOP_PORT}))
+            print(json.dumps({"already_running": a.port}))
             return 0
         until = datetime.fromisoformat(a.until).replace(tzinfo=timezone.utc) if a.until else None
         due = {f.name: 0.0 for f in feeds}
