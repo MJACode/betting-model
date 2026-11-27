@@ -26,6 +26,7 @@ realised, bets a day, and which book the bets land at.
     python -m scripts.nhl_prop_backtest --model nhl_prop_saves
     python -m scripts.nhl_prop_backtest --cache DIR          # read a local copy, not the database
     python -m scripts.nhl_prop_backtest --moneypuck          # points and assists candidate, not live
+    python -m scripts.nhl_prop_backtest --assists-no-team-pace  # assists without team pace, not live
 """
 import argparse
 import sys
@@ -330,6 +331,16 @@ def log_loss(b: pd.DataFrame) -> float:
     return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
 
 
+def brier(b: pd.DataFrame) -> float:
+    """Brier score of P(this side wins) on decisive rows. A push is left out."""
+    d = _decisive(b)
+    if not len(d):
+        return float("nan")
+    y = d.won.to_numpy(dtype=float)
+    p = d.p.to_numpy(dtype=float)
+    return float(np.mean((p - y) ** 2))
+
+
 def calibration_error(b: pd.DataFrame, n_bins: int = 10) -> float:
     """Mean absolute gap between claimed P(side) and the hit rate, weighted by count."""
     d = _decisive(b)
@@ -376,6 +387,7 @@ def _metric_row(label: str, b: pd.DataFrame) -> dict:
         "decisive": len(d),
         "pushes": int((b.actual == b.line).sum()) if len(b) else 0,
         "log_loss": None if not len(d) else round(log_loss(b), 4),
+        "brier": None if not len(d) else round(brier(b), 4),
         "cal_err": None if not len(d) else round(calibration_error(b), 4),
         "claimed": None if not len(d) else round(float(d.p.mean()), 3),
         "hit": None if not len(d) else round(float(d.won.mean()), 3),
@@ -424,8 +436,7 @@ POINT_GROUPS = (
      ("pp_share_l", "pp_share_s", "pp_unit_pts_l", "pp_unit_pts_s", "pp_unit_xg_l", "pp_unit_xg_s")),
     ("without linemate quality",
      ("lm_pts_l", "lm_pts_s", "lm_xg_l", "lm_xg_s")),
-    ("without team pace and xG for",
-     ("own_mp_pace_l", "own_mp_xgf_l")),
+    ("without team pace and xG for", np_.TEAM_PACE_FEATURES),
     ("without opponent xG against", ("opp_mp_xga_l",)),
     ("without goalie quality", ("opp_gsax_l",)),
     ("without referee power-play rate", ("ref_pp_l",)),
@@ -547,11 +558,207 @@ def load_points_inputs(cache: str | None) -> tuple[pd.DataFrame, pd.DataFrame, p
         conn.close()
 
 
+# The cuts asked for on the no-pace assists candidate. 0.18 is the live floor.
+PACE_EV_CUTS = (0.12, 0.15, 0.18, 0.22)
+# Same buckets as claimed_vs_realised. A bucket with no decisive rows is omitted.
+RELIABILITY_EDGES = (
+    (0.0, 0.3), (0.3, 0.4), (0.4, 0.5), (0.5, 0.55), (0.55, 0.6),
+    (0.6, 0.65), (0.65, 0.7), (0.7, 0.8), (0.8, 1.01),
+)
+
+
 def _point_seasons(games: pd.DataFrame) -> list[int]:
     """Priced seasons the candidate walk-forward can score, including the one in progress."""
     have = set(int(s) for s in games.season.dropna().unique())
     seasons = [s for s in POINT_SEASONS if s in have]
     return seasons or list(SEASONS)
+
+
+def reliability(b: pd.DataFrame) -> list[dict]:
+    """Claimed P(side) against the hit rate, by bucket, on decisive rows."""
+    d = _decisive(b)
+    rows = []
+    for lo, hi in RELIABILITY_EDGES:
+        q = d[(d.p >= lo) & (d.p < hi)]
+        if not len(q):
+            continue
+        claimed = float(q.p.mean())
+        hit = float(q.won.mean())
+        rows.append({
+            "bucket": f"{lo:.2f}-{min(hi, 1.0):.2f}",
+            "n": len(q),
+            "claimed": round(claimed, 3),
+            "hit": round(hit, 3),
+            "gap": round(hit - claimed, 3),
+        })
+    return rows
+
+
+def restrict_slate(left: pd.DataFrame, right: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Keep the player-games both frames can score. The quotes on those games stay."""
+    keys = ["game_id", "pkey"]
+    both = left[keys].drop_duplicates().merge(right[keys].drop_duplicates(), on=keys)
+    return left.merge(both, on=keys), right.merge(both, on=keys)
+
+
+def _pace_bets(sides_df: pd.DataFrame, cut: float) -> pd.DataFrame:
+    """Unders only, best price, the -200 floor, no per-game cap. Assists' rule."""
+    return card(sides_df, cut, ("under",), per_game=None)
+
+
+def _with_price(label: str, b: pd.DataFrame) -> dict:
+    row = _metric_row(label, b)
+    if len(b):
+        price = b.price.astype(float)
+        row["med_price"] = int(price.median())
+        row["shortest"] = int(price.min())
+        row["share_le_-300"] = round(float((price <= -300).mean()), 4)
+        row["share_le_-500"] = round(float((price <= -500).mean()), 4)
+    return row
+
+
+def _halves(label: str, b: pd.DataFrame) -> list[dict]:
+    if len(b) < 2:
+        return []
+    ordered = b.sort_values(["game_date", "game_id", "pkey"])
+    h = len(ordered) // 2
+    return [
+        _with_price(f"{label} early", ordered.iloc[:h]),
+        _with_price(f"{label} late", ordered.iloc[h:]),
+    ]
+
+
+def pace_report(live: pd.DataFrame, cand: pd.DataFrame, floor: float,
+                seasons: list[int]) -> str:
+    """Live assists against the no-pace candidate.
+
+    Own bets are each model on every player-game it can score. The same slate
+    is the player-games both can score. Units at 1 unit risked, and at 1 unit
+    to win with the risk capped at 3. The day interval resamples whole game days.
+    """
+    live_same, cand_same = restrict_slate(live, cand)
+    universes = (
+        ("live own", live),
+        ("no-pace own", cand),
+        ("live same slate", live_same),
+        ("no-pace same slate", cand_same),
+    )
+    headline = []
+    for name, sides_df in universes:
+        headline.append(_with_price(f"{name} bets EV>={floor:.2f}", _pace_bets(sides_df, floor)))
+        headline.append(_with_price(f"{name} every under", _population(sides_df, "under")))
+        headline.append(_with_price(f"{name} overs EV>={floor:.2f}", card(sides_df, floor, ("over",))))
+    keys = ["game_id", "pkey", "book", "line", "side"]
+    live_bets = _pace_bets(live_same, floor)
+    cand_bets = _pace_bets(cand_same, floor)
+    both_keys = live_bets.merge(cand_bets[keys], on=keys, how="inner")
+    headline.append(_with_price(f"same-slate bets both take, live p, EV>={floor:.2f}", both_keys))
+    if len(both_keys):
+        cand_both = both_keys[keys].merge(cand_same, on=keys, how="inner")
+        headline.append(_with_price(
+            f"same-slate bets both take, no-pace p, EV>={floor:.2f}", cand_both))
+    cuts = []
+    for cut in PACE_EV_CUTS:
+        for name, sides_df in universes:
+            cuts.append(_with_price(f"{name} EV>={cut:.2f}", _pace_bets(sides_df, cut)))
+    seasons_rows = []
+    halves = []
+    for name, sides_df in universes:
+        taken = _pace_bets(sides_df, floor)
+        seasons_rows += _by_season(f"{name} bets EV>={floor:.2f}", taken, seasons)
+        halves += _halves(f"{name} bets EV>={floor:.2f}", taken)
+    reliable_blocks = []
+    for name, frame in (
+        (f"live same-slate bets EV>={floor:.2f}", live_bets),
+        (f"no-pace same-slate bets EV>={floor:.2f}", cand_bets),
+        ("live same-slate every under", _population(live_same, "under")),
+        ("no-pace same-slate every under", _population(cand_same, "under")),
+    ):
+        rows = reliability(frame)
+        reliable_blocks.append(name + "\n" + (pd.DataFrame(rows).to_string(index=False) if rows else "(none)"))
+    live_players = live[["game_id", "pkey"]].drop_duplicates()
+    cand_players = cand[["game_id", "pkey"]].drop_duplicates()
+    both_players = live_players.merge(cand_players, on=["game_id", "pkey"])
+    lines = [
+        f"nhl_prop_assists no-team-pace candidate. USE_ASSISTS_NO_TEAM_PACE="
+        f"{np_.USE_ASSISTS_NO_TEAM_PACE}. The card scores ASSISTS. Nothing here is registered.",
+        f"unders only, no per-game cap, best EV, floor {FLOOR}, own probability, live EV cut {floor:.2f}.",
+        "units_risked is 1 unit risked (a loss is -1). units_to_win is 1 unit to win, risk capped at 3.",
+        "roi is the mean profit per bet. The 95% columns resample whole game days, 5000 draws, seed 7.",
+        "brier and log_loss are on decisive rows. Lines are x.5 in this market, so a push is rare.",
+        f"priced player-games live can score {len(live_players):,}; no-pace {len(cand_players):,}; "
+        f"both {len(both_players):,}.",
+        f"same-slate bets live {len(live_bets):,}; no-pace {len(cand_bets):,}; both take {len(both_keys):,}.",
+        "",
+        "HEADLINE",
+        pd.DataFrame(headline).to_string(index=False),
+        "",
+        "EV CUTS 0.12 / 0.15 / 0.18 / 0.22",
+        pd.DataFrame(cuts).to_string(index=False),
+        "",
+        "BY SEASON",
+        pd.DataFrame(seasons_rows).to_string(index=False),
+        "",
+        "EARLY / LATE, bets ordered by date",
+        pd.DataFrame(halves).to_string(index=False) if halves else "(none)",
+        "",
+        "RELIABILITY",
+        "\n\n".join(reliable_blocks),
+        "",
+        "COMPACT",
+    ]
+    for row in headline + cuts + seasons_rows + halves:
+        lines.append(
+            f"{row['set']}: rows={row['rows']} units_risked={row.get('units_risked')} "
+            f"roi_risked={row.get('roi_risked')} ci_risked={row.get('95% risked')} "
+            f"units_to_win={row.get('units_to_win')} roi_to_win={row.get('roi_to_win')} "
+            f"ci_to_win={row.get('95% to win')} brier={row.get('brier')} "
+            f"log_loss={row.get('log_loss')} cal_err={row.get('cal_err')} "
+            f"claimed={row.get('claimed')} hit={row.get('hit')} "
+            f"med_price={row.get('med_price')}"
+        )
+    return "\n".join(lines)
+
+
+def _run_assists_no_team_pace(a) -> None:
+    """Walk the no-pace assists spec forward and compare it with live assists.
+
+    Each season is fit only on earlier seasons. The live spec is fit on the
+    live feature list. The candidate is fit without team pace and team xG for.
+    Neither fit is stored.
+    """
+    spec = np_.assists_no_team_pace_spec()
+    if np_.USE_ASSISTS_NO_TEAM_PACE:
+        print("USE_ASSISTS_NO_TEAM_PACE is true in this process. The card still scores ASSISTS. "
+              "This run does not register an artifact and does not change the live spec.")
+    if spec is np_.ASSISTS or spec in np_.LIVE or spec.features == np_.ASSISTS.features:
+        raise SystemExit("the no-pace spec is the live spec")
+    if any(f in spec.features for f in np_.TEAM_PACE_FEATURES):
+        raise SystemExit("the no-pace spec still carries team pace")
+    if set(np_.ASSISTS.features) - set(spec.features):
+        raise SystemExit("the no-pace spec dropped a live feature")
+    data = load(a.cache, POINT_SEASONS, markets=[np_.ASSISTS.market])
+    seasons = _point_seasons(data["games"])
+    skaters, mp_teams, goalies, mates, refs = load_points_inputs(a.cache)
+    base = np_.build_frame(np_.ASSISTS, data["skater"], data["teams"])
+    framed = np_.add_points_features(base, skaters, mp_teams, goalies, mates, refs, data["teams"])
+    print(f"no-pace features: {', '.join(spec.features)}")
+    print(f"dropped: {', '.join(np_.TEAM_PACE_FEATURES)}")
+    print(f"seasons {[_season_name(s) for s in seasons]}; flag USE_ASSISTS_NO_TEAM_PACE="
+          f"{np_.USE_ASSISTS_NO_TEAM_PACE}")
+    live = report(np_.ASSISTS, data, base, None, seasons, quiet=True)
+    cand = report(spec, data, framed, None, seasons, quiet=True)
+    floor = float(config.MODEL_OWN_EV_FLOOR["nhl_prop_assists"])
+    text = pace_report(live, cand, floor, seasons)
+    print(f"\n{'=' * 100}\nNO-TEAM-PACE ASSISTS\n{'=' * 100}\n{text}")
+    if a.dump:
+        out = Path(a.dump)
+        out.mkdir(parents=True, exist_ok=True)
+        live.assign(model_id="nhl_prop_assists").to_pickle(out / "sides_nhl_prop_assists.pkl")
+        cand.assign(model_id="nhl_prop_assists_no_team_pace").to_pickle(
+            out / "sides_nhl_prop_assists_no_team_pace.pkl")
+    if a.results:
+        Path(a.results).write_text(text + "\n", encoding="utf-8")
 
 
 def _run_moneypuck(a) -> None:
@@ -598,10 +805,19 @@ def main() -> None:
     ap.add_argument("--dump", default=None, help="write the bet-level rows to this folder")
     ap.add_argument("--moneypuck", action="store_true",
                     help="walk-forward points and assists with the candidate features and compare them to the current features")
+    ap.add_argument("--assists-no-team-pace", action="store_true",
+                    help="walk-forward the assists candidate without team pace and compare it to live assists")
     ap.add_argument("--results", default=None, help="write the comparison here")
     a = ap.parse_args()
+    if a.moneypuck and a.assists_no_team_pace:
+        raise SystemExit("run one backtest at a time")
     if a.moneypuck and a.model not in (None, "nhl_prop_assists", "nhl_prop_points"):
         raise SystemExit("--moneypuck is the points and assists models only")
+    if a.assists_no_team_pace and a.model not in (None, "nhl_prop_assists"):
+        raise SystemExit("--assists-no-team-pace is the assists model only")
+    if a.assists_no_team_pace:
+        _run_assists_no_team_pace(a)
+        return
     if a.moneypuck:
         _run_moneypuck(a)
         return

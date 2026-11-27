@@ -30,6 +30,26 @@ review as its own entry.
 
 ---
 
+## 2026-11-27 — NHL assists without team pace, walked as its own spec
+
+1. **Scope.** Follow-up the same day to the assists ablation in
+   `docs/nhl_prop_points_moneypuck.md`. Backtest only. Not a live model.
+   Result: `docs/nhl_prop_assists_no_team_pace.md`.
+2. **Tried.** The MoneyPuck assists candidate with team pace and team expected
+   goals for removed (`own_mp_pace_l`, `own_mp_xgf_l`), refit each walk-forward
+   fold, unders, best price, −200, EV cuts 0.12 / 0.15 / 0.18 / 0.22, seasons
+   2023-24 through 2026-27 to date. Compared with live assists on the
+   player-games both can score.
+3. **New.** Nothing added to `methods.md`. Dropping a required feature also
+   changes which rows the fit keeps. That was checked: the named spec's bets
+   match the ablation cell. The result is in the doc, not a new method.
+4. **Corrected.** The earlier entry said that cell was not walked as its own
+   model. The ablation had already refit each fold; naming the spec and
+   running it alone reproduces 267 bets, +53.59 units, +20.07% (day interval
+   +7.0% to +33.7%) at 1 unit risked. On the same slate it beats the live
+   list at the live cut. It does not beat it at 0.12 or at 0.22.
+5. **The framework.** Nothing in SKILL.md changed. The flag stays off.
+
 ## 2026-11-27: NHL points and assists, MoneyPuck, shifts and referees, backtest only
 
 1. **Scope.** mike, 2026-11-27: the points prop, which is not a live model, and
