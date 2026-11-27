@@ -767,17 +767,25 @@ export function PicksHomeScreen() {
   // not one per sport tab). It reads the signals themselves, not this tab's
   // board: a filter or search set on one sport's tab cannot be seen from the
   // top of the screen, so it would drop picks without a word. Finished games
-  // are left out, as the per-sport board leaves them out. Offered only when
-  // signals span two or more sports; with one, the board's own row is it.
+  // are left out, as the per-sport board leaves them out. The ROW is offered
+  // only when the READY picks span two or more sports (with one, the board's
+  // own row is it); the candidates are not gated, so an open sheet keeps its
+  // data when a sport's last game goes final (UX review, 2026-11-27).
   const betAllEverySport = useMemo(() => {
     if (view !== 'signals' || !myBooksReady || signalsLocked) return null;
     const open = allData.filter(
       (d) => gameStateOf(gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null)) !== 'final',
     );
-    const c = betAllCandidates(open, (id) => liveStates.get(id) ?? null, myBooks);
-    return betAllSports(c).length >= 2 ? c : null;
+    return betAllCandidates(open, (id) => liveStates.get(id) ?? null, myBooks);
   }, [view, myBooksReady, signalsLocked, allData, liveStates, myBooks, thresholdsRevision]);
+  const everySportCount = betAllEverySport ? betAllSports(betAllEverySport).length : 0;
+  const showBetAllSports = everySportCount >= 2;
   const betAllSheet = betAllScope === 'all' ? betAllEverySport : betAllScope === 'sport' ? betAll : null;
+  // A sheet whose candidates went away (left Signals, books reloading) is
+  // closed, so it never reopens later without a tap (UX review, 2026-11-27).
+  useEffect(() => {
+    if (betAllScope != null && betAllSheet == null) setBetAllScope(null);
+  }, [betAllScope, betAllSheet]);
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
@@ -952,17 +960,17 @@ export function PicksHomeScreen() {
         ) : null}
         {/* Bet all across every sport (Matt, 2026-11-27), above the sport
             chips because it covers all of them. */}
-        {betAllEverySport ? (
+        {betAllEverySport && showBetAllSports ? (
           <Pressable
             onPress={() => setBetAllScope('all')}
             accessibilityRole="button"
-            accessibilityLabel={`Bet all sports: ${betAllEverySport.picks.length} of ${betAllEverySport.picks.length + betAllEverySport.skipped.length} signals ready across ${betAllSports(betAllEverySport).length} sports, as single bets`}
+            accessibilityLabel={`Bet all sports: ${betAllEverySport.picks.length} of ${betAllEverySport.picks.length + betAllEverySport.skipped.length} ready across ${everySportCount} sports, as single bets`}
             accessibilityHint="Opens every sport's pre-game signals. Board filters don't apply."
             style={({ pressed }) => [styles.betAllSportsRow, pressed && styles.betAllPressed]}
           >
             <Ionicons name="layers-outline" size={18} color={colors.tint} />
             <Text style={styles.betAllSportsText} numberOfLines={2}>
-              {`Bet all sports · ${betAllEverySport.picks.length} ready across ${betAllSports(betAllEverySport).length} sports`}
+              {`Bet all sports · ${betAllEverySport.picks.length} of ${betAllEverySport.picks.length + betAllEverySport.skipped.length} ready across ${everySportCount} sports`}
             </Text>
             <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
           </Pressable>
@@ -980,6 +988,9 @@ export function PicksHomeScreen() {
             // H9, 45pt with no visual change: 6pt over the subtitle line above
             // (text, not a control) and half of the 12pt gap to the sub-tab chips
             // below — they take the other half (SUBTAB_REACH_ABOVE).
+            // With the Bet all sports row above, the reach's 6pt past the
+            // chips' own wrap falls inside that row's 8pt bottom margin, so
+            // it never takes a tap meant for the row (UX review, 2026-11-27).
             reachAbove={6}
             reachBelow={4}
           />
@@ -1693,6 +1704,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     minHeight: 44,
     marginTop: spacing.sm,
+    marginBottom: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,

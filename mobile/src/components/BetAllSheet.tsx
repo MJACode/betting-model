@@ -53,6 +53,16 @@ interface Props {
   onClose: () => void;
 }
 
+/** Picks split by sport, in the order each sport first appears. */
+function bySport(ps: readonly BetAllPick[]): [string, BetAllPick[]][] {
+  const m = new Map<string, BetAllPick[]>();
+  for (const p of ps) {
+    const s = p.pick.sport ?? '';
+    m.set(s, [...(m.get(s) ?? []), p]);
+  }
+  return [...m.entries()];
+}
+
 function stakeText(risk: number, win: number): string {
   return `Bet ${formatUnits(risk)} · Win ${formatUnits(win)}`;
 }
@@ -228,8 +238,8 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
             {trueMinus(p.label)}
           </Text>
           <Text style={styles.rowSub} numberOfLines={2}>
-            {/* Same word as the card's Track button, so the two read as one state; keep in step with `sub`. */}
-            {sportPrefix(p.pick)}
+            {/* Same word as the card's Track button, so the two read as one state. `sub` adds the
+                sport for VoiceOver only: on screen the sport is the group's header (UX review). */}
             {tracked ? <Text style={styles.trackedTag}>Tracking</Text> : null}
             {tracked ? ` · ${detail}` : detail}
           </Text>
@@ -240,14 +250,29 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
   };
 
   // Best line: picks grouped under the book the plan will open.
+  // On the all-sports sheet each book splits by sport, under a sport header,
+  // so the row's footnote keeps its room for "Found at" (UX review, 2026-11-27).
   const bestGroups = useMemo(() => {
     const m = new Map<string, BetAllPick[]>();
     for (const p of picks) {
       const b = quoteForBestLine(p).bookmaker;
       m.set(b, [...(m.get(b) ?? []), p]);
     }
-    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [picks]);
+    return [...m.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .flatMap(([b, ps]) =>
+        showSport
+          ? bySport(ps).map(([s, sp]) => ({ key: `${b}:${s}`, title: `${sportDisplayName(s)} · ${bookName(b)} · best line`, picks: sp }))
+          : [{ key: b, title: `${bookName(b)} · best line`, picks: ps }],
+      );
+  }, [picks, showSport]);
+  const bookGroups = useMemo(
+    () =>
+      showSport
+        ? bySport(picks).map(([s, sp]) => ({ key: s, title: sportDisplayName(s), picks: sp }))
+        : [{ key: 'all', title: null as string | null, picks }],
+    [picks, showSport],
+  );
 
   const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
   // Picks on the list that are ticked.
@@ -287,7 +312,9 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
               </Text>
               <Text style={styles.subtitle}>
                 {phase === 'choose'
-                  ? BET_ALL_LIVE_NOTE
+                  ? showSport
+                    ? `Every sport’s signals. Board filters don’t apply. ${BET_ALL_LIVE_NOTE}`
+                    : BET_ALL_LIVE_NOTE
                   : 'Tick each bet once you’ve placed it to track it.'}
               </Text>
             </View>
@@ -351,15 +378,20 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
 
               <ScrollView style={styles.list} bounces={false}>
                 {mode === 'best' ? (
-                  bestGroups.map(([b, ps]) => (
-                    <View key={b} style={styles.group}>
-                      <Text style={styles.groupTitle}>{`${bookName(b)} · best line`}</Text>
-                      <View style={styles.card}>{ps.map(pickRow)}</View>
+                  bestGroups.map((g) => (
+                    <View key={g.key} style={styles.group}>
+                      <Text style={styles.groupTitle} accessibilityRole="header">{g.title}</Text>
+                      <View style={styles.card}>{g.picks.map(pickRow)}</View>
                     </View>
                   ))
                 ) : (
                   <View style={styles.group}>
-                    <View style={styles.card}>{picks.map(pickRow)}</View>
+                    {bookGroups.map((g) => (
+                      <View key={g.key} style={g.title ? styles.group : undefined}>
+                        {g.title ? <Text style={styles.groupTitle} accessibilityRole="header">{g.title}</Text> : null}
+                        <View style={styles.card}>{g.picks.map(pickRow)}</View>
+                      </View>
+                    ))}
                     {onePlan.missing.length > 0 && chosenBook ? (
                       <Text style={styles.warn}>
                         {`${onePlan.missing.length} selected ${onePlan.missing.length === 1 ? 'pick isn’t' : 'picks aren’t'} at ${bookName(chosenBook)}. Best line includes ${onePlan.missing.length === 1 ? 'it' : 'them'}.`}
