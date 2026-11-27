@@ -120,3 +120,93 @@ def test_the_board_quote_replaces_the_providers_draftkings_row():
     assert games == {"g"} and len(dk) == 1 and dk[0]["spread_home"] == -4.5
     assert pd.Timestamp(dk[0]["snapshot_at"]) == fetched - pd.Timedelta(seconds=8)
     assert [r for r in out if r["bookmaker"] == "pinnacle"][0]["spread_home"] == -3.5
+
+
+# ─── best line: another book's own page on the fast path (issue #1644) ───────
+#
+# mike, 2026-11-26: "We want best line". Pinned: FanDuel's own-page spread is
+# a fast decider when it passes its gates (fresh page, on offer, confirmed,
+# stood 10 s), stamped at its previous read so the model's FRESH rule runs
+# from there; a number set before the last basket, a young one, an unconfirmed
+# one and a failed read leave the decision DraftKings' as before; the
+# provider's copy of FanDuel is never a fast decider.
+
+class FakeBooks:
+    def __init__(self, rows=None, fail=False):
+        self.rows, self.fail, self.calls = rows or [], fail, 0
+
+    def quotes(self, game_ids, at, markets=("spreads", "totals")):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("book_live_reads unreachable")
+        from models import book_live_quotes as OB
+        return pd.DataFrame([r for r in self.rows if r["game_id"] in game_ids], columns=OB.QUOTE_COLS)
+
+
+def fd_quote(w, *, stamp=2.0, shown=4.0, held=True, spread=(-2.5, -120.0, 100.0)):
+    return {"game_id": S.GAME_ID, "market": "spreads", "book": "fanduel",
+            "stamp": pd.Timestamp(w) + pd.Timedelta(seconds=stamp),
+            "shown": pd.Timestamp(w) + pd.Timedelta(seconds=shown), "held": held,
+            "spread_home": spread[0], "home_price": spread[1], "away_price": spread[2],
+            "total_line": float("nan"), "over_price": float("nan"), "under_price": float("nan")}
+
+
+def fast_books(art, monkeypatch, quote=None, fail=False, **kw):
+    loop, db, clock, w, slot = fast(art, monkeypatch, **kw)
+    loop.books = FakeBooks([quote(w)] if quote else [], fail=fail)
+    return loop, db, clock, w, slot
+
+
+def test_fanduels_own_page_is_a_fast_decider(art, monkeypatch):
+    loop, db, clock, w, slot = fast_books(art, monkeypatch, quote=lambda w: fd_quote(w))
+    loop.tick()
+    assert clock.now == slot                                     # still the fast way, no wait
+    row = db.ledger[(S.GAME_ID, M.SPREAD_Q12)]
+    assert row["outcome"] == "bet" and "fanduel's own page" in row["reason"]
+    p, = db.picks
+    assert (p["pick_label"], p["decision_book"], p["decision_odds"]) == ("NYK +2.5 (live)", "fanduel", 100.0)
+    assert p["scored_line"] == -2.5                              # the HOME number
+
+
+def test_a_number_set_before_the_last_basket_is_not_a_fast_decider(art, monkeypatch):
+    # its previous read was 5 s before the 7:00 basket
+    loop, db, clock, w, slot = fast_books(art, monkeypatch, quote=lambda w: fd_quote(w, stamp=-5.0))
+    loop.tick()
+    p, = db.picks
+    assert p["decision_book"] == "draftkings"
+    assert "own page" not in db.ledger[(S.GAME_ID, M.SPREAD_Q12)]["reason"]
+
+
+def test_a_young_or_unconfirmed_number_is_not_a_fast_decider(art, monkeypatch):
+    for q in (lambda w: fd_quote(w, stamp=12.0, shown=14.0), lambda w: fd_quote(w, held=False)):
+        loop, db, clock, w, slot = fast_books(art, monkeypatch, quote=q)
+        loop.tick()
+        assert db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_a_failed_read_of_the_other_books_leaves_the_fast_way_draftkings_only(art, monkeypatch):
+    loop, db, clock, w, slot = fast_books(art, monkeypatch, fail=True)
+    loop.tick()
+    assert loop.books.calls == 1 and db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_with_no_own_page_quote_the_providers_fanduel_is_still_not_a_fast_decider(art, monkeypatch):
+    loop, db, clock, w, slot = fast_books(art, monkeypatch)
+    loop.tick()
+    assert db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_own_page_rows_are_stamped_at_the_previous_read_and_ride_the_fetch():
+    w = pd.Timestamp("2026-11-27T01:00:00Z")
+    rows = [{"game_id": "g", "sport": "NBA", "market": "spreads", "bookmaker": b, "snapshot_type": "in_play",
+             "snapshot_at": w.isoformat(), "spread_home": -3.5, "home_price": -110.0, "away_price": -110.0,
+             "home_link": None} for b in ("draftkings", "pinnacle", "fanduel")]
+    q = pd.DataFrame([{**fd_quote(w), "game_id": "g"}, {**fd_quote(w), "game_id": "other"}])
+    own = LP.own_page_rows(q, rows, {"g"}, w + pd.Timedelta(seconds=20), books=("fanduel",))
+    [r] = own
+    assert (r["bookmaker"], r["spread_home"], r["away_price"], r["source"]) == ("fanduel", -2.5, 100.0, "fanduel_board")
+    assert pd.Timestamp(r["snapshot_at"]) == w + pd.Timedelta(seconds=2)
+    fr = LP.fast_rows(rows, own, {"g"})
+    assert sorted(x["bookmaker"] for x in fr) == ["draftkings", "fanduel", "pinnacle"]
+    assert [x for x in fr if x["bookmaker"] == "fanduel"][0]["source"] == "fanduel_board"   # not the provider's
+    assert LP.own_page_rows(q, rows, {"g"}, w + pd.Timedelta(seconds=13), books=("fanduel",)) == []   # stood 9 s

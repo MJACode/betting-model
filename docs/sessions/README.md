@@ -20,6 +20,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Stats → Games, a CBS-style scoreboard with today's lines as bet buttons (matt) |
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, FanDuel and BetRivers college football pages, recorded only (mike) |
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Merged the best-line steps; NBA in play takes the other books too (mike) |
 | 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Code graph, doc summaries refreshed and every group named (mike) |
 | 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Teams board: ML, spread, Over and Under all addable from any stat (matt) |
 | 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Eggz recap uses his own grades (mike) |
