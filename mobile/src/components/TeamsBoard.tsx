@@ -38,7 +38,7 @@ import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
 import { addDays, etDate, formatAmerican, weekdayET, gameStatus } from '@/lib/format';
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
-import { teamLineSheetInput } from '@/lib/lineLegs';
+import { teamLineSheetChoices, teamLineSheetInput } from '@/lib/lineLegs';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamPeriodRows, fetchTeamStats } from '@/lib/queries';
 import {
@@ -442,6 +442,28 @@ export function TeamsBoard({
       }),
     [gameLines, slate.games, lineMarket, books, unstarted],
   );
+  // Every game market per team, for the sheet's ML / spread / Over / Under
+  // chips (Matt, 2026-11-26). The pill keeps the stat's own market; the bet
+  // the user can add does not depend on which stat is selected.
+  const linesByMarket = useMemo(() => {
+    const build = (market: 'h2h' | 'spreads' | 'totals') =>
+      buildTeamLineIndex(gameLines, slate.games, { market, books, gameIds: unstarted });
+    return { h2h: build('h2h'), spreads: build('spreads'), totals: build('totals') };
+  }, [gameLines, slate.games, books, unstarted]);
+  const lineChoices = useMemo(
+    () =>
+      lineSheet
+        ? teamLineSheetChoices(
+            {
+              h2h: linesByMarket.h2h.get(lineSheet.team),
+              spreads: linesByMarket.spreads.get(lineSheet.team),
+              totals: linesByMarket.totals.get(lineSheet.team),
+            },
+            sport,
+          )
+        : undefined,
+    [lineSheet, linesByMarket, sport],
+  );
   // Gated on the DAY and the BOOKS, never on which stat is selected and
   // never on the sport — the column must not come and go as the user taps
   // through chips. College basketball shows the same moneyline, spread and
@@ -669,7 +691,14 @@ export function TeamsBoard({
         data={ranked}
         keyExtractor={(item) => item.row.team}
         renderItem={({ item: { row: item, rank } }) => {
-          const quote = lineByTeam.get(item.team) ?? null;
+          // The stat's own market first; when no book prices it yet, any
+          // market that is priced, so a team with a game never reads "—".
+          const quote =
+            lineByTeam.get(item.team) ??
+            linesByMarket.h2h.get(item.team) ??
+            linesByMarket.spreads.get(item.team) ??
+            linesByMarket.totals.get(item.team) ??
+            null;
           const slateGame = slateGameFor({ team: item.team }, slateGameIndex)?.game ?? null;
           return (
             <TeamRow
@@ -731,6 +760,7 @@ export function TeamsBoard({
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
       <AddLineSheet
         input={lineSheet ? teamLineSheetInput(lineSheet, sport) : null}
+        choices={lineChoices}
         game={lineSheet ? slate.games.find((g) => g.game_id === lineSheet.gameId) ?? null : null}
         onClose={() => setLineSheet(null)}
         onAdded={onAdded}

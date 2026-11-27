@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,13 +7,20 @@ import { showToast } from '@/components/Toast';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { formatAmerican, MINUS } from '@/lib/format';
-import { isGameSpec, lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib/lineLegs';
+import {
+  isGameSpec,
+  lineLegKey,
+  lineLegLabel,
+  type LineSheetChoice,
+  type LineSheetInput,
+} from '@/lib/lineLegs';
 import { bookLabelShort, bookName, MODEL_BOOK } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 import type { GameRow } from '@/types';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { SegmentTabs } from '@/components/GroupTabs';
 
 /**
  * "Add to betslip?" — what a tap on a Stats line pill opens.
@@ -35,15 +42,25 @@ import { PrimaryButton } from '@/components/PrimaryButton';
  * spec, a Teams pill a game spec — the moneyline, the spread at the board's
  * number, the total — through lib/lineLegs.ts propLineSheetInput /
  * teamLineSheetInput. The sheet itself does not know which it was given.
+ *
+ * A Teams pill also hands it `choices` (2026-11-26, Matt: "If you want to get
+ * ML, spread or over and under it's not available to add as a bet which it
+ * should be"): the team's moneyline, its spread and both sides of the total,
+ * as a chip row under the title. `input` is the one the pill priced and opens
+ * selected; a chip swaps the proposition, its prices and the action together.
  */
 export function AddLineSheet({
   input,
   game,
   onClose,
   onAdded,
+  choices,
 }: {
   /** The proposition and every bettable book's price for it; null closes. */
   input: LineSheetInput | null;
+  /** Other bets the user can switch to on the same game (Teams board). The
+   *  chip row shows only when there are two or more. */
+  choices?: readonly LineSheetChoice[];
   game: GameRow | null;
   onClose: () => void;
   /** Called after a successful add — the Stats screen uses it to bounce back
@@ -53,7 +70,20 @@ export function AddLineSheet({
   const legs = useLineLegs();
   const { books: myBooks } = usePreferredBooks();
 
-  const spec = input?.spec ?? null;
+  // Which chip is selected. Reset during render (not in an effect) whenever
+  // the sheet is handed a different proposition, so reopening on another
+  // row never shows the previous row's choice for a frame.
+  const openedKey = input ? lineLegKey(input.spec) : null;
+  const [picked, setPicked] = useState<{ for: string | null; key: string | null }>({
+    for: openedKey,
+    key: openedKey,
+  });
+  if (picked.for !== openedKey) setPicked({ for: openedKey, key: openedKey });
+  const chips = choices && choices.length > 1 ? choices : null;
+  const chosen = chips?.find((c) => c.key === picked.key)?.input ?? null;
+  const shown = input ? chosen ?? input : null;
+
+  const spec = shown?.spec ?? null;
   const key = spec ? lineLegKey(spec) : null;
   const inSlip = key != null && legs.has(key);
   // A parlay takes one game line per game (parlay.ts isValidCombo). Say so
@@ -68,12 +98,12 @@ export function AddLineSheet({
   // Every bettable book pricing THIS side at THIS line, best payout first
   // (American odds are monotonic in payout; ties keep the board's order) —
   // already in that order from the input helper.
-  const prices = useMemo(() => input?.prices ?? [], [input]);
+  const prices = useMemo(() => shown?.prices ?? [], [shown]);
   const best = prices[0]?.price ?? null;
 
   // The title IS the proposition — the exact string the betslip's leg card
   // will show, so the slip entry is recognisable from here.
-  const title = input?.title ?? (spec ? lineLegLabel(spec) : '');
+  const title = shown?.title ?? (spec ? lineLegLabel(spec) : '');
   const matchup = matchupForLeg(game);
 
   const act = () => {
@@ -124,14 +154,36 @@ export function AddLineSheet({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
+          {/* The market switch sits directly under the title, above the
+              explainer: the explainer can grow to the two-line same-game
+              warning when the market changes, and a control above it never
+              moves under the thumb (UX review, 2026-11-27). */}
+          {chips ? (
+            <View style={styles.chips}>
+              <SegmentTabs
+                compact
+                fit
+                items={chips.map((c) => c.key)}
+                active={picked.key ?? chips[0]!.key}
+                onChange={(k) => setPicked({ for: openedKey, key: k })}
+                labelFor={(k) => chips.find((c) => c.key === k)?.label ?? ''}
+                accessibilityLabelFor={(k) => {
+                  const c = chips.find((x) => x.key === k);
+                  if (!c) return '';
+                  return `${lineLegLabel(c.input.spec)}${legs.has(k) ? ', in betslip' : ''}`;
+                }}
+              />
+            </View>
+          ) : null}
           {/* The ask, and where the book gets chosen — under the title, where
               the reference sheets put their one-line explainer, not as a
               caption under the list (UX review). */}
           <Text style={styles.subtitle}>
             {sameGameLine
               ? `Your betslip already has ${lineLegLabel(sameGameLine)} on this game. A parlay takes one game line per game.`
-              : input?.explainer ?? 'Add it to your betslip now — you’ll choose the sportsbook there.'}
+              : shown?.explainer ?? 'Add it to your betslip now — you’ll choose the sportsbook there.'}
           </Text>
+
 
           <Text style={styles.sectionTitle}>Where it&apos;s posted</Text>
           {/* One card, hairline rows: a read-only comparison, styled unlike
@@ -200,6 +252,9 @@ export function AddLineSheet({
 
 const styles = StyleSheet.create({
   cta: { marginTop: spacing.md },
+  chips: {
+    marginBottom: spacing.md,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: '#00000066',
