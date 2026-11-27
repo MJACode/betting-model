@@ -97,8 +97,9 @@ class _PlanConn:
     ingestor's bet games and its closes-taken read."""
 
     def __init__(self, slate_rows, decided=(), taken=(), bet_rows=(), closes=(), proj_decided=(),
-                 projected=None, sched=()):
+                 projected=None, sched=(), early_decided=(), early_taken=()):
         self.slate_rows, self.decided, self.taken = slate_rows, set(decided), set(taken)
+        self.early_decided, self.early_taken = set(early_decided), set(early_taken)
         self.sched = list(sched)
         self.bet_rows, self.closes = list(bet_rows), set(closes)
         self.proj_decided, self.projected = set(proj_decided), dict(projected or {})
@@ -111,6 +112,8 @@ class _PlanConn:
             self._rows = sorted({(r[1], r[2], r[3]) for r in self.sched})
         elif "FROM nba_schedule s LEFT JOIN games g" in s:
             self._rows = list(self.sched)
+        elif "FROM nba_prop_market_early_decisions" in s:
+            self._rows = [(g,) for g in params[0] if g in self.early_decided]
         elif "FROM nba_prop_market_decisions" in s:
             self._rows = [(g,) for g in params[0] if g in self.decided]
         elif "FROM nba_prop_projection_decisions" in s:
@@ -118,7 +121,8 @@ class _PlanConn:
         elif "FROM nba_prop_projections" in s:
             self._rows = [(g, t) for g, t in self.projected.items() if g in params[0]]
         elif "SELECT DISTINCT game_id FROM picks" in s:
-            self._rows = [(g,) for g in params[1] if g in self.taken]
+            mine = self.early_taken if params[0] == "nba_prop_market_early" else self.taken
+            self._rows = [(g,) for g in params[1] if g in mine]
         elif "FROM picks p JOIN games g" in s:
             self._rows = list(self.bet_rows)
         elif "FROM player_prop_odds" in s:
@@ -138,8 +142,10 @@ def _game(gid, minutes, game_type="regular", day="2026-10-21"):
 def _plan(conn, monkeypatch):
     import scripts.nba_prop_market_card as card
     import scripts.nba_prop_projection_card as pcard
+    import scripts.nba_prop_market_early_card as ecard
     import scripts.nba_prop_window as win
     monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
+    monkeypatch.setattr(ecard, "ensure_decisions_table", lambda c: None)
     monkeypatch.setattr(pcard, "ensure_tables", lambda c: None)
     return win.plan(conn, NOW)
 
@@ -399,3 +405,79 @@ def test_the_window_job_is_every_five_minutes_on_the_pipeline_service(monkeypatc
     assert "nba_prop_window" in scheduler._PIPELINE_JOBS
     assert "nba_prop_window" not in scheduler._POLLER_JOBS
     assert MAX_SILENCE["nba_prop_window"] == 30
+
+
+# ── the early lane: nba_prop_market_early, 10 hours before tip ───────────────
+# mike, 2026-11-26: "yes ship it I don't care about credits". The early card decides 570-630
+# minutes before tip; the refresh passes (overnight to 4:17am ET, hourly from 7:17am) put no
+# look in that window for a tip between 14:47 and 16:47 ET (51 of 1,230 games in 2025-26).
+
+GAP_TIPS = [(15, 0), (15, 30), (16, 0), (16, 30)]
+
+
+def test_the_plan_takes_early_games_595_to_607_minutes_out_the_early_card_has_not_decided(monkeypatch):
+    conn = _PlanConn([_game("AT594", 594), _game("AT595", 595), _game("AT600", 600),
+                      _game("AT607", 607), _game("AT608", 608), _game("E_DONE", 600),
+                      _game("E_BET", 601), _game("RULE_DONE", 602),
+                      _game("PLAYOFF", 600, "playoff")],
+                     early_decided={"E_DONE"}, early_taken={"E_BET"},
+                     # the 40-62 minute models' ledgers say nothing about the early card
+                     decided={"RULE_DONE"}, taken={"RULE_DONE"}, sched=_SCHED_2027)
+    p = _plan(conn, monkeypatch)
+    # PLAYOFF: the early card bets the regular season only (scripts/nba_prop_market_card.slate)
+    assert p.early == ["AT595", "AT600", "AT607", "RULE_DONE"]
+    assert p.decide == [] and p.close == [] and not p.publish
+
+
+def test_the_early_look_ahead_sits_inside_the_early_cards_window_at_the_graded_lead():
+    import scripts.nba_prop_market_early_card as ecard
+    import scripts.nba_prop_window as win
+    lo, hi = ecard.WINDOW_MIN
+    assert lo <= win.EARLY_LOOK_MIN[0] <= 600 <= win.EARLY_LOOK_MIN[1] <= hi
+
+
+def test_a_tick_with_only_early_games_fetches_exactly_them_then_runs_the_early_card(monkeypatch):
+    import scripts.nba_prop_window as win
+    ran, _ = _tick(monkeypatch, win.Plan(decide=[], close=[], early=["E1", "E2"]))
+    assert [label for label, _, _ in ran] == ["nba-prop-early-fetch", "nba-prop-market-early"]
+    assert ran[0][1][-3:] == ["--fetch", "E1", "E2"]
+    assert ran[1][1][-2:] == ["--step", "nba-prop-market-early"]
+    assert all(kw.get("timeout") for _, _, kw in ran), "every step is bounded (see _run)"
+
+
+def test_the_early_lane_runs_after_every_live_models_steps(monkeypatch):
+    """Its card is paused, so nothing it writes is published: it never stands in front of a
+    live decision, a close or a projection."""
+    import scheduler
+    import scripts.nba_prop_window as win
+    order = []
+    monkeypatch.setattr(win, "plan_tick", lambda now=None: win.Plan(
+        decide=["G1"], close=["G0"], project=["G9"], first_basket=["F1"], early=["E1"]))
+    monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw: order.append(label) or "ok")
+    monkeypatch.setattr(scheduler, "_publish_new_signals", lambda src: order.append("publish"))
+    scheduler.run_nba_prop_window()
+    assert order[-2:] == ["nba-prop-early-fetch", "nba-prop-market-early"]
+    assert order.index("publish") < order.index("nba-prop-early-fetch")
+
+
+@pytest.mark.parametrize("hh,mm", GAP_TIPS + [(12, 0), (19, 0), (22, 10)])
+def test_every_tip_time_gets_early_looks_at_the_graded_lead(monkeypatch, hh, mm):
+    """Two or more ticks land 595-607 minutes before every tip, and the tick at that moment
+    puts the game in its early list."""
+    import scripts.nba_prop_window as win
+    tip = datetime(2026, 11, 29, hh, mm, tzinfo=ET)
+    lo, hi = win.EARLY_LOOK_MIN
+    fires = _fires(_jobs(monkeypatch)["nba_prop_window"],
+                   tip - timedelta(minutes=hi), tip - timedelta(minutes=lo))
+    assert len(fires) >= 2, f"{len(fires)} early look(s) before a {hh}:{mm:02d} ET tip"
+
+
+@pytest.mark.parametrize("hh,mm", GAP_TIPS)
+def test_the_refresh_passes_alone_reach_no_early_window_for_these_tips(monkeypatch, hh, mm):
+    """Why the early lane exists: no refresh pass lands 570-630 minutes before these tips."""
+    import scripts.nba_prop_market_early_card as ecard
+    tip = datetime(2026, 11, 29, hh, mm, tzinfo=ET)
+    lo, hi = ecard.WINDOW_MIN
+    jobs = _jobs(monkeypatch)
+    for jid in ("hourly_refresh", "overnight_refresh", "evening_refresh"):
+        assert _fires(jobs[jid], tip - timedelta(minutes=hi), tip - timedelta(minutes=lo)) == [], jid

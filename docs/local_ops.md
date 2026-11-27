@@ -909,7 +909,10 @@ stop a DraftKings read. Each book and live sport is polled as fast as the book a
   (`max-age=30, stale-while-revalidate=60`, answers 13-21 s old when read
   2026-11-26), so its numbers were on the site at `read_at - page_age_s`;
   BetRivers' answers were a cache miss (no Age) or 2 s old. `book_live_feed`
-  carries the newest answer's age too. Nothing decides on either yet.
+  carries the newest answer's age too. `prev_read_at` / `prev_page_age_s`
+  are the same book and sport's previous clean read: the page did not show
+  the row's numbers then. They are NULL on a start, and on rows written before
+  2026-11-26's second change. `models/book_live_quotes.py` is the one reader.
 
 Each book and sport's last read, and what it answered:
 

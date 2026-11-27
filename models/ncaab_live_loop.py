@@ -103,6 +103,15 @@ SUMMARY_THREADS = int(os.environ.get("NCAAB_LIVE_SUMMARY_THREADS", "16"))
 DK_TICK_SEC = float(os.environ.get("NCAAB_LIVE_DK_TICK_SEC", "1.0"))
 DK_MAX_WAIT_SEC = float(os.environ.get("NCAAB_LIVE_DK_MAX_WAIT_SEC", "20"))
 DK_ON = os.environ.get("NCAAB_LIVE_DK", "1") != "0"
+# BEST LINE ON THE FAST PATH (mike, 2026-11-26: "We want best line"; issue
+# #1644). The window also takes FanDuel's and BetRivers' own-page numbers
+# (models/book_live_quotes.py, from mike's machine), each only while its page
+# is as fresh as DraftKings' board must be, the number is on offer, and no
+# point has been scored since the book set it (models/ncaab_live_dk.
+# quote_states_books). DraftKings' own holds are unchanged, and a book's quote
+# that fails a rule is dropped, never waited on. NCAAB_LIVE_OTHER_BOOKS=0
+# turns it off (DraftKings only on the fast path, as before).
+OTHER_BOOKS_ON = os.environ.get("NCAAB_LIVE_OTHER_BOOKS", "1") != "0"
 BOARD_REUSE_SEC = 5.0
 # While ESPN's clock runs, a newest play older than this means its play list
 # has stopped: the scoring 99th-percentile lag (55 s) plus a minute between plays.
@@ -122,6 +131,14 @@ DONE_STATUSES = ("STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_CANCELLED", "STA
 def deciding_books() -> tuple:
     import config
     return tuple(config.BEST_LINE_BOOKMAKERS)
+
+
+def other_deciding_books() -> tuple:
+    """The other books whose own page the fast path reads, less any the
+    platform does not let a pick name (config.BEST_LINE_BOOKMAKERS)."""
+    from models import book_live_quotes as OB
+    allowed = set(deciding_books())
+    return tuple(b for b in OB.BOOKS if b in allowed)
 
 
 # ─── the cadence ──────────────────────────────────────────────────────────────
@@ -575,6 +592,9 @@ class Loop:
         # DraftKings' own board (models/ncaab_live_dk.py): the fast path, tried
         # first in every window; None turns it off.
         self.dk = dk
+        # The other books' own pages (models/book_live_quotes.DbSource) on
+        # that path; None keeps it DraftKings only.
+        self.books = None
         self._boards = None
         self._fast = False                     # the last tick asked for a fast next one
         self.dry_run, self.wait, self.recheck, self.sleep = dry_run, float(wait), float(recheck), sleep
@@ -804,6 +824,7 @@ class Loop:
         mine = [(c, g) for c, g in todo if c.game_id in have]
         if not mine:
             return 0, set(), set()
+        book_q = self.other_book_quotes({c.game_id for c, _g in mine}, fetch_at)
         if st.dk_first is None:
             st.dk_first = now
         give_up = (now - st.dk_first).total_seconds() > DK_MAX_WAIT_SEC
@@ -854,24 +875,51 @@ class Loop:
                 # baskets on 2026-11-12, repriced a read or two later)
                 hold(c, g, "a basket DraftKings has not repriced yet")
                 continue
+            books, q_all = (DK.BOOK,), q
+            if len(book_q):
+                qb = DK.quote_states_books(book_q[book_q["game_id"] == c.game_id], reads, fetch_at, plays, q)
+                qb = qb[qb["market"].isin({r.market for r in rules})]
+                if len(qb):
+                    q_all = pd.concat([q, qb], ignore_index=True) if len(q) else qb
+                    books = (DK.BOOK,) + other_deciding_books()
             try:
-                decs = evaluate_states(c, self.art, q, rules, (DK.BOOK,)) if len(q) else []
+                decs = evaluate_states(c, self.art, q_all, rules, books) if len(q_all) else []
             except Exception as exc:                  # noqa: BLE001
                 log.exception("%s DraftKings evaluation failed: %s", c.game_id, exc)
                 hold(c, g, f"evaluation failed: {type(exc).__name__}")
                 continue
             done.add(c.game_id)
             if not decs:
-                self.note(c, g, "carried", "no eligible quote on DraftKings' board", fetch_at.to_pydatetime())
+                why = "no eligible quote on DraftKings' board" + ("" if books == (DK.BOOK,)
+                                                                  else " or the other books' pages")
+                self.note(c, g, "carried", why, fetch_at.to_pydatetime())
                 continue
             newest = plays[c.game_id]["wallclock"].max()
-            notes = {"play_lag_s": (now - newest).total_seconds() if pd.notna(newest) else None, "links": {},
-                     "source": "DraftKings board"}
             for rule, b, off, stt in decs:
+                # A bet at another book is a new population: its ledger
+                # reason names the page it was decided on.
+                src = ("DraftKings board" if b.get("book") == DK.BOOK
+                       else f"DraftKings board; {b.get('book')}'s own page")
+                notes = {"play_lag_s": (now - newest).total_seconds() if pd.notna(newest) else None, "links": {},
+                         "source": src}
                 decisions.append((c, g, rule, b, off, stt, notes))
         n = self.decide(decisions, fetch_at.to_pydatetime()) if decisions else 0
         st.dk_done |= done
         return n, done, waiting
+
+    def other_book_quotes(self, game_ids: set, fetch_at) -> pd.DataFrame:
+        """The other books' quotes that pass models/book_live_quotes' gates
+        at DraftKings' read, or none: a failed read leaves the window
+        DraftKings only, as it was."""
+        from models import book_live_quotes as OB
+        if self.books is None or not game_ids:
+            return pd.DataFrame(columns=OB.QUOTE_COLS)
+        try:
+            return self.books.quotes(game_ids, fetch_at, markets=("spreads", "totals"))
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("other books' pages could not be read (DraftKings only this window): %s", exc)
+            self.recycle()
+            return pd.DataFrame(columns=OB.QUOTE_COLS)
 
     def run_slot(self, slot: datetime, todo: list) -> tuple:
         out: dict = {}
@@ -1153,6 +1201,11 @@ def main(argv=None) -> int:
         loop.dk = DbSource(loop.c)
         log.info("fast path on: DraftKings' own board (dk_live_feed / dk_live_reads), read every %.1f s "
                  "while a window waits on it", DK_TICK_SEC)
+        if OTHER_BOOKS_ON:
+            from models import book_live_quotes as OB
+            loop.books = OB.DbSource(loop.c, SPORT)
+            log.info("best line on the fast path: %s from their own pages (book_live_reads), same freshness "
+                     "bound as DraftKings' board", ", ".join(other_deciding_books()))
     if not a.dry_run:
         try:
             if not ledger_ready(loop.c()):

@@ -150,6 +150,99 @@ def quote_states_dk(reads: pd.DataFrame, fetch_at, plays_by_game: dict) -> pd.Da
     return qs
 
 
+# Another book's number must have stood this long on its page, with no score on
+# DraftKings' board since the book set it, before it may decide. BetRivers
+# moves AHEAD of DraftKings' score: measured 2026-11-26 (NCAAB, 827 of
+# DraftKings' score changes on games BetRivers carried), its spread changed in
+# the 5 s before DraftKings showed the score 370 times, against 171-231 in any
+# other 5 s window from 5 to 65 s before. Inside 10 s a number can carry a
+# basket our state does not; after it, DraftKings would have shown the score.
+CONFIRM_SEC = 10.0
+
+
+def _read_at_or_before(g: pd.DataFrame, at):
+    """The game's newest DraftKings read at or before `at`, or None."""
+    h = g[g["read_at"] <= at]
+    return None if not len(h) else h.iloc[-1]
+
+
+def quote_states_books(book_q: pd.DataFrame, reads: pd.DataFrame, fetch_at, plays_by_game: dict,
+                       dk_qs: pd.DataFrame | None = None, outlier_pts: float = 6.0,
+                       confirm_sec: float = CONFIRM_SEC) -> pd.DataFrame:
+    """Another book's quotes (models.book_live_quotes.current_quotes at
+    `fetch_at`) in quote_states_dk's shape, ALREADY FILTERED, so the window
+    can add them after DraftKings' own hold checks (mike, 2026-11-26: "We want
+    best line"; issue #1644). The rule's terms, on that book's number:
+      STATE   DraftKings' board at the page time the book's number was first
+              SHOWN (`shown`), as DraftKings' own rows are priced at their
+              first sighting; fouls from ESPN at that time.
+      FRESH   no point between the book's `stamp` (its previous read's page
+              time: the number was set after it) and the decision read, on
+              DraftKings' score. A number up before the last score is DROPPED,
+              not held for: it is the book's to reprice, not ours to wait on.
+      HELD    the book's newest read is after the read that first showed it.
+      STOOD   shown at least `confirm_sec` before the decision read
+              (CONFIRM_SEC: a book can move for a basket before DraftKings'
+              board shows it).
+      NEAR    within `outlier_pts` of DraftKings' own number on the market,
+              when DraftKings has one: M.drop_outliers then cannot drop
+              DraftKings' row for another book's stale one.
+    A game with no DraftKings read at the stamp, or no ESPN plays, is left
+    out (fail closed). `fetch_at` is DraftKings' feed read the window decides
+    on, so the book's rows share its fetch (decision_offers prices the first)."""
+    fetch_at = pd.Timestamp(fetch_at)
+    out = []
+    if book_q is None or not len(book_q) or reads is None or not len(reads):
+        return pd.DataFrame(out, columns=QS_COLS)
+    dk_num = {}
+    if dk_qs is not None and len(dk_qs):
+        for _i, r in dk_qs.iterrows():
+            dk_num[(r["game_id"], r["market"])] = r["spread_home"] if r["market"] == "spreads" else r["total_line"]
+    for _i, q in book_q.iterrows():
+        gid, market = q["game_id"], q["market"]
+        if market not in ("spreads", "totals") or gid not in plays_by_game or not bool(q["held"]):
+            continue
+        if (fetch_at - pd.Timestamp(q["shown"])).total_seconds() < confirm_sec:
+            continue
+        g = reads[reads["game_id"] == gid].sort_values("read_at")
+        now_r = _read_at_or_before(g, fetch_at)
+        at_stamp = _read_at_or_before(g, q["stamp"])
+        st = _read_at_or_before(g, q["shown"])
+        if now_r is None or at_stamp is None or st is None:
+            continue
+        if any(pd.isna(x) for x in (now_r["home_score"], now_r["away_score"], at_stamp["home_score"],
+                                     at_stamp["away_score"], st["home_score"], st["away_score"],
+                                     st["period"], st["clock_s"])):
+            continue
+        pts = abs((now_r["home_score"] + now_r["away_score"]) - (at_stamp["home_score"] + at_stamp["away_score"]))
+        if pts > 0:
+            continue
+        num = q["spread_home"] if market == "spreads" else q["total_line"]
+        ref = dk_num.get((gid, market))
+        if ref is not None and pd.notna(ref) and abs(float(num) - float(ref)) > outlier_pts:
+            continue
+        h_tf, a_tf = _fouls_at(plays_by_game.get(gid), q["shown"])
+        per, clock = float(st["period"]), float(st["clock_s"])
+        out.append({
+            "game_id": gid, "market": market, "book": q["book"], "stamp": q["shown"], "fetch_at": fetch_at,
+            "home_price": q["home_price"] if market == "spreads" else np.nan,
+            "away_price": q["away_price"] if market == "spreads" else np.nan,
+            "spread_home": q["spread_home"] if market == "spreads" else np.nan,
+            "total_line": q["total_line"] if market == "totals" else np.nan,
+            "over_price": q["over_price"] if market == "totals" else np.nan,
+            "under_price": q["under_price"] if market == "totals" else np.nan,
+            "period": per, "clock_s": clock, "game_s": (per - 1) * 1200.0 + (1200.0 - clock),
+            "type_text": "End Period" if st["period_label"] == "Halftime" else "",
+            "h_pts": int(st["home_score"]), "a_pts": int(st["away_score"]), "h_tf": h_tf, "a_tf": a_tf,
+            "h_fetch": int(now_r["home_score"]), "a_fetch": int(now_r["away_score"]),
+            "pts_since": 0.0, "held": True,
+        })
+    qs = pd.DataFrame(out, columns=QS_COLS)
+    for c in ("home_price", "away_price", "spread_home", "total_line", "over_price", "under_price"):
+        qs[c] = pd.to_numeric(qs[c], errors="coerce").astype(float)
+    return qs
+
+
 class DbSource:
     """A loop's DraftKings source on the worker: the two tables, read on the
     loop's own connection, for one sport."""
