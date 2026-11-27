@@ -434,9 +434,8 @@ Neither cell is a bet.
   commercial exploitation "except with our express written permission". Signal Base charges
   nothing (mike, 2026-11-27: nothing is set up to charge money), and mike's call is to use the
   data without asking.
-- **Value to the models: not measured.** Its published accuracy is against an unnamed baseline,
-  not the line. It cannot help `nba_prop_market` or `nba_prop_market_early`, which read prices
-  only. The test that answers it is in the session log for 2026-11-27.
+- **Value to the models: tested on its free data, section F.** It cannot help `nba_prop_market`
+  or `nba_prop_market_early`, which read prices only.
 
 **DraftKings splits for NBA, NHL and NCAAF.** The page answers for each league when asked by
 event group directly: NBA 42648 parsed 5 games, NHL 42133 parsed 7, NCAAF 87637 parsed 10, every
@@ -485,3 +484,67 @@ shares bought before tip, 814,908 fifteen-minute rows.
 4. **The earlier prop snapshot is the more promising lead.** `nba_prop_market`'s frozen rule at
    10 hours returned +5.8% a bet on 7,572 bets against +2.6% at 1 hour on the same games, ahead in
    every season. Its 2025-26 value against Pinnacle's later price was +0.78%.
+
+## F. Dunks & Threes, tested on its free data (2026-11-27, mike: "just test it with the free data")
+
+**What is free** (read from the worker; the sandbox cannot resolve the host). The API answers 401
+without a key and past dates on the EPM pages are locked. A past game's page data
+(`/games/<id>/__data.json`, `has_access` 0) carries the pre-game `p_home_score`, `p_away_score`,
+`win_prob`, and per player `p_stl`, `p_fg2m`, `p_fg2a`, EPM, `p_pct_start`, `p_play`; `p_mp`,
+`p_pts`, `p_reb`, `p_ast`, `p_fg3m`, `p_blk` and `p_tov` are null. So sides, totals and steals props
+can be tested; points, rebounds, threes and blocks cannot.
+
+**Imported** (`data/ingestors/dnt_game_pages.py`, source `dnt_free_game_page`): every regular-season
+game of 2023-24, 2024-25 and 2025-26 (3,690, all matched to `games`) and 58 of 2026-27, into
+`dnt_game_predictions` and `dnt_player_predictions` (121,354 player rows in the full run). The site
+answered 429 at one page every 1.2-1.5 s; at 3 s it did not.
+
+**Two cautions on every number here.** Every date is served by today's model (`epm_source` v2), so
+the model has seen these seasons: in-sample. And a past page's inputs carry a pre-game status
+time about 15 minutes before tip, so they can hold injury news our quotes did not have. The second
+is why the opening-line grades below are not usable: D&T against Pinnacle's open shows +5.1%,
++3.3% and +1.9% on spreads, the size of a late-news leak, and nothing at the close.
+
+**Sides and totals, at Pinnacle's last pre-tip line and price** (`scripts/sql/dnt_game_grade.sql`,
+1 unit to win, every game bet on D&T's side):
+
+| Season | Spreads | Totals |
+|---|---|---|
+| 2023-24 | 1,230 bets, -0.4% (SE 2.8) | -4.6% |
+| 2024-25 | -1.4% | -5.7% |
+| 2025-26 | -2.0% | -5.6% |
+
+No cut of D&T's distance from the line (2 to 8 points) is positive in more than one season. **No
+information beyond the closing line.**
+
+**Steals props** (`scripts/sql/dnt_steals_grade.sql`). No stored book prices Pinnacle steals, so
+the market is the mean proportional no-vig over across books at each player's main line; D&T's
+over probability is Poisson(`p_stl`). Bets at the best price at that line, players who did not
+play left out. The baseline is every under at the best price.
+
+| Props, line | Season | Every under | D&T unders, 5+ points | D&T unders, 10+ points |
+|---|---|---|---|---|
+| 1 hour, 0.5 | 2023-24 | -1.5% (11,248) | +7.0% (3,194; SE 1.9) | +11.0% (958) |
+| 1 hour, 0.5 | 2024-25 | -3.6% (8,330) | -1.9% (1,286; SE 3.0) | -9.8% (279) |
+| 1 hour, 0.5 | 2025-26 | +0.4% (7,726) | +9.0% (1,552; SE 2.9) | +7.5% (370) |
+| 1 hour, 1.5 | 2023-24 | +4.9% (3,336) | +10.0% (1,805; SE 1.8) | +17.2% (786) |
+| 1 hour, 1.5 | 2024-25 | -0.5% (3,587) | +4.2% (1,150; SE 2.3) | +2.6% (306) |
+| 1 hour, 1.5 | 2025-26 | +0.1% (4,175) | +3.7% (1,361; SE 2.1) | +8.3% (421) |
+| 10 hours, 0.5 | 2023-24 | -2.4% (5,985) | +9.3% (1,383; SE 3.0) | +15.6% (330) |
+| 10 hours, 0.5 | 2024-25 | -4.5% (6,120) | +2.4% (862; SE 3.9) | +6.8% (185) |
+| 10 hours, 0.5 | 2025-26 | -0.7% (3,142) | +13.8% (588; SE 4.9) | +5.7% (147) |
+| 10 hours, 1.5 | 2023-24 | +3.3% (2,506) | +7.8% (1,285; SE 2.2) | +13.7% (531) |
+| 10 hours, 1.5 | 2024-25 | -0.05% (3,031) | +6.8% (1,021; SE 2.5) | +5.9% (325) |
+| 10 hours, 1.5 | 2025-26 | -2.3% (3,452) | +2.6% (1,047; SE 2.4) | +6.7% (342) |
+
+D&T's unders beat every-under in all twelve cells, and are positive at 5+ points in eleven. Its
+overs are flat or negative everywhere (2025-26, 1 hour, 0.5: -6.8% on 3,743). D&T's mean over
+probability matched the over rate (2023-24, 1 hour: 0.479 against 0.478) while the market's sat at
+0.507; D&T's Brier score was lower (0.2369 against 0.2388).
+
+**Verdict.** Sides and totals: nothing, free or paid. Steals: the one place D&T looks to carry
+information the prop market lacks, on the under, at both quote times, in three seasons. It is
+in-sample and may carry late news, so it is a lead and not an edge. The test that settles both is
+forward: D&T's numbers for upcoming games, captured when we would bet, graded against the prices
+of that moment.
+

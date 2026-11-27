@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Dunks & Threes tested on its free data; the 10-hour model's first live day (mike) |
 | 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Would Dunks & Threes data help the NBA models? Not measured; the test (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NCAAB in play bets the best line on the fast path (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, In-play best line, step two begins: the previous read, and one reader (mike) |
