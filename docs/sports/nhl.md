@@ -444,7 +444,10 @@
   `nhl_team_game_log` / `games`; `our_game_id` is filled from the log.
   Nothing that writes a pick reads them. A flagged points and assists
   backtest reads skater, team and goalie rows; the live card does not
-  (`docs/nhl_prop_points_moneypuck.md`). Sizes and the backfill command:
+  (`docs/nhl_prop_points_moneypuck.md`). A second flagged assists
+  walk-forward drops team pace and team expected goals for
+  (`USE_ASSISTS_NO_TEAM_PACE`, default false,
+  `docs/nhl_prop_assists_no_team_pace.md`). Sizes and the backfill command:
   `data/ingestors/moneypuck_nhl.py`.
 - **Shift charts, officials, lines, EDGE** (2026-11-26), personal
   non-commercial, not a pick input. `nhl_shifts` is every shift from
