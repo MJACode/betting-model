@@ -140,7 +140,9 @@ check('slate teams, sorted, deduplicated',
 check('legend: free throws count', /free throws included/.test(NBA_FB_LEGEND));
 
 console.log('segments');
-check('NBA top row ends with 1st Basket', boardSegmentsFor('NBA').join('|') === 'players|teams|firstBasket', boardSegmentsFor('NBA'));
+// Games joined the end of every team sport's row on 2026-11-27 (Matt: "games
+// tab where you mentioned"); 1st Basket keeps its place after Teams.
+check('NBA top row: Players | Teams | 1st Basket | Games', boardSegmentsFor('NBA').join('|') === 'players|teams|firstBasket|games', boardSegmentsFor('NBA'));
 for (const s of ['MLB', 'WNBA', 'NHL', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'ATP', 'WTA'] as const) {
   check(`${s} has no 1st Basket`, !boardSegmentsFor(s).includes('firstBasket'));
 }

@@ -44,6 +44,8 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { showToast } from '@/components/Toast';
 import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
+import { GamesBoard } from '@/components/GamesBoard';
+import { useMembership } from '@/hooks/useMembership';
 import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
 import { InjuryChip } from '@/components/InjuryChip';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -187,6 +189,7 @@ import {
 import {
   boardSegmentsFor,
   supportsFirstBasketBoard,
+  supportsGamesBoard,
   type BoardSegment,
   chipsForSegment,
   defaultSegmentFor,
@@ -478,6 +481,8 @@ export function StatsScreen() {
   const etDay = etDate(new Date(now));
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
+  // The Games board is the Scoreboard's content, and Premium like it.
+  const { contentLocked: gamesLocked } = useMembership();
   // The "hasn't posted lines" note is the switch — an instruction sits with
   // the control that performs it.
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -665,6 +670,7 @@ export function StatsScreen() {
   const activeSegment: StatSegment =
     boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams'
     : boardMode === 'firstBasket' && supportsFirstBasketBoard(sport) ? 'firstBasket'
+    : boardMode === 'games' && supportsGamesBoard(sport) ? 'games'
     : segment;
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
@@ -1122,7 +1128,7 @@ export function StatsScreen() {
    * Keeping the column keeps the line the user was reading, too.
    */
   const pickSegment = (next: StatSegment) => {
-    if (next === 'teams' || next === 'firstBasket') {
+    if (next === 'teams' || next === 'firstBasket' || next === 'games') {
       setBoardMode(next);
       return;
     }
@@ -2753,6 +2759,39 @@ export function StatsScreen() {
             setSlateReload((n) => n + 1);
             setInjuryReload((n) => n + 1);
           }}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // Games board (Matt, 2026-11-27): scores for the day strip, and bet
+  // buttons on today's games that have not started. Ahead of the
+  // empty-catalog guard, like Teams.
+  if (boardMode === 'games' && supportsGamesBoard(sport)) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
+            <View style={styles.rightActions}>
+              <NotificationBell />
+              <SettingsButton />
+            </View>
+          </View>
+          <SportsbookIndicator coverageNote={coverageNote} />
+        </View>
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
+        <GamesBoard
+          sport={sport}
+          locked={gamesLocked}
+          onUnlock={() => navigation.navigate('Paywall')}
+          onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
+          onOpenGame={hasMatchupView(sport) ? (gameId) => navigation.navigate('ScoreboardGame', { gameId }) : undefined}
         />
       </SafeAreaView>
     );
@@ -4658,7 +4697,7 @@ function StatSegmentRow({
   onChange,
 }: {
   sport: Sport;
-  /** 'teams' / 'firstBasket' while that board is on, else the player segment. */
+  /** 'teams' / 'firstBasket' / 'games' while that board is on, else the player segment. */
   active: StatSegment;
   /** The player segment last picked, kept while Teams is on. */
   segment: StatSegment;
@@ -4667,7 +4706,8 @@ function StatSegmentRow({
   const positions = positionSegmentsFor(sport);
   // The top row's board: Teams and 1st Basket are their own boards; any other
   // segment is the Players board.
-  const board: BoardSegment = active === 'teams' || active === 'firstBasket' ? active : 'players';
+  const board: BoardSegment =
+    active === 'teams' || active === 'firstBasket' || active === 'games' ? active : 'players';
   return (
     <>
       <SegmentTabs
@@ -4677,8 +4717,9 @@ function StatSegmentRow({
         labelFor={segmentLabel}
         accessibilityLabelFor={segmentAccessibilityLabel}
         tight
-        // Three tabs on the NBA (Players | Teams | 1st Basket): about 96pt each
-        // at 320pt, so labels shrink rather than truncate (UX review, 2026-11-08).
+        // Four tabs on the NBA (Players | Teams | 1st Basket | Games, since
+        // 2026-11-27): about 72pt each at 320pt, so labels shrink rather than
+        // truncate (UX review, 2026-11-08 and 2026-11-27).
         fit
       />
       {board === 'players' ? (
