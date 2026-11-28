@@ -112,8 +112,13 @@ def test_betslip_bar_inset_wiring():
     assert "export function setBetslipBarInset" in hook and "export function useBetslipBarInset" in hook
     spacer = _read(SRC / "components" / "BetslipBarSpacer.tsx")
     assert "height: inset" in spacer and "if (inset <= 0) return null;" in spacer
-    # A representative screen from each list kind.
-    assert "ListFooterComponent={<BetslipBarSpacer />}" in _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    # A representative screen from each list kind. Picks shares the footer
+    # with the Started group (2026-11-28); the spacer is still the last
+    # child, so the bar's height is reserved under that group.
+    picks = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    footer = picks.split("ListFooterComponent={", 1)[1].split("data={mainRows}", 1)[0]
+    assert "<BetslipBarSpacer />" in footer
+    assert footer.rfind("<BetslipBarSpacer />") > footer.rfind("StartedGroup")
     assert re.search(r"<BetslipBarSpacer />\s*</ScrollView>", _read(SRC / "screens" / "SettingsScreen.tsx"))
 
 

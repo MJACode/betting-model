@@ -31,6 +31,7 @@ import {
   isPausedForDisplay,
   isUnlockedPreview,
   passesActionFilter,
+  passesRecordFilter,
   stakeFor,
   type UnitStake,
 } from './thresholds';
@@ -213,6 +214,48 @@ export function betAllCandidates(
     });
   }
   return { picks, skipped };
+}
+
+/**
+ * The sport sheet. `open` is the board list Bet all already reads. Finished
+ * picks are not on it (useTodayPicks keeps them apart), and a graded final
+ * would be dropped by `openForAction` even if it were. `finals` are that
+ * sport's finished signals. Each is listed as not included, reason started,
+ * and none of them is offered to bet or counted as ready.
+ */
+export function sportBetAllCandidates(
+  open: readonly EnrichedPick[],
+  finals: readonly EnrichedPick[],
+  liveStateFor: (gameId: string) => LiveGameStateRow | null | undefined,
+  myBooks: readonly string[],
+): BetAllCandidates {
+  const finalKeys = new Set(finals.map((d) => betAllKey(d.pick)));
+  const base = betAllCandidates(
+    open.filter((d) => !finalKeys.has(betAllKey(d.pick))),
+    liveStateFor,
+    myBooks,
+  );
+  const seen = new Set<string>();
+  for (const p of base.picks) seen.add(p.key);
+  for (const s of base.skipped) seen.add(s.key);
+  const skipped = [...base.skipped];
+  for (const item of finals) {
+    const { pick } = item;
+    const key = betAllKey(pick);
+    if (seen.has(key)) continue;
+    if (pick.is_live === true) continue;
+    if (pick.signal_type !== 'BET' || isUnlockedPreview(pick) || isPausedForDisplay(pick)) continue;
+    const graded = pick.result === 'WIN' || pick.result === 'LOSS' || pick.result === 'PUSH';
+    if (!(graded ? passesRecordFilter(pick) : passesActionFilter(pick))) continue;
+    seen.add(key);
+    skipped.push({
+      key,
+      pick,
+      label: pickTitleText(pick).trim(),
+      reason: 'started',
+    });
+  }
+  return { picks: base.picks, skipped };
 }
 
 export interface BetAllLeg {

@@ -301,11 +301,13 @@ def test_picks_home_no_fake_zeros_and_neutral_chips():
     assert "knownCount(0, { loaded: liveLoaded, error: liveError," in home
     # The All segment, and the header and count it carried, were removed
     # 2026-11-20 (Matt). A failed load still says "—", never 0.
-    assert "`${date} · — pre-game signals`" in home
     assert '<SubTabBtn label="All"' not in home
-    assert "count={todayUnknown ? null : live.length}" in home
+    assert "count={todayUnknown ? null : signalsOnBoard}" in home
     assert "count={liveUnknown ? null : liveData.length}" in home
-    assert "${todayUnknown ? '—' : live.length} pre-game signals" in home
+    # The Signals subtitle is gone (Matt, 2026-11-27). The segment count is
+    # what still reads "—" rather than 0 before the first load. Live keeps
+    # its own line.
+    assert "pre-game signals" not in home
     assert re.search(r"liveUnknown\s*\? '— in play'", home)
     assert "available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}" in home
     assert "available={availableSports}" not in home

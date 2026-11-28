@@ -135,8 +135,14 @@ interface Props {
    * a PAUSED chip, the reference sentence, no stake, no Sharp Score, no book
    * hand-off and no betslip button. */
   paused?: boolean;
-  /** Option 1 card. Picks home uses it on All, Signals and Live. */
+  /** Option 1 card. Picks home uses it on Signals and Live. */
   layout?: 'board' | 'signals';
+  /**
+   * Signals board only (Matt, 2026-11-27). Drops model chance, expected
+   * return, the model name and the posted time — those live on Pick Detail.
+   * Live Signals leaves this off, so that card stays as it was.
+   */
+  trimmed?: boolean;
   /** NCAAF school → abbreviation for the Signals compact line. */
   teamAbbrevs?: ReadonlyMap<string, string> | null;
 }
@@ -181,6 +187,7 @@ export function PickCard({
   showSignalBadge = false,
   paused = false,
   layout = 'board',
+  trimmed = false,
   teamAbbrevs = null,
 }: Props) {
   const { pick, game, weather } = item;
@@ -674,11 +681,15 @@ export function PickCard({
         teams: signalsTeamsSpeech(contextSport, game?.away_team ?? '', game?.home_team ?? ''),
         time: contextTime || null,
         edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
-        modelChance: `Model chance ${formatPct(pick.model_probability)}`,
-        expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
+        modelChance: trimmed ? null : `Model chance ${formatPct(pick.model_probability)}`,
+        expectedReturn: trimmed
+          ? null
+          : flagged || ev == null
+            ? 'Expected return unavailable'
+            : `Expected return ${formatPctSigned(ev)}`,
         stake: myBooksNoteSpoken ? `${signalsStakeSpoken}. ${myBooksNoteSpoken}` : signalsStakeSpoken,
-        modelName: `${markedModel} model`,
-        posted: timing?.label ?? null,
+        modelName: trimmed ? null : `${markedModel} model`,
+        posted: trimmed ? null : (timing?.label ?? null),
         paused: null,
         gameStatus: gameStarted ? baseStatusSpeech : null,
         sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
@@ -1095,7 +1106,7 @@ export function PickCard({
         </View>
       ) : null}
       </>
-      ) : (
+      ) : !trimmed ? (
       <>
       <View style={styles.contextRow}>
         {preview ? (
@@ -1415,6 +1426,146 @@ export function PickCard({
         </View>
       ) : null}
       <Text style={styles.modelCaption}>{modelCaption}</Text>
+      </>
+      ) : (
+      <>
+      <View style={styles.contextRow}>
+        {preview ? (
+          <View style={[styles.labelChip, styles.previewBadge]}>
+            <Text style={styles.previewBadgeText}>PREVIEW</Text>
+          </View>
+        ) : paused ? (
+          <View style={[styles.labelChip, styles.previewBadge]}>
+            <Text style={styles.previewBadgeText}>PAUSED</Text>
+          </View>
+        ) : (
+          <View style={styles.labelChip}>
+            <SignalBadge signal={pick.signal_type} small />
+          </View>
+        )}
+        <Text style={styles.matchupLine}>
+          {contextLine}
+        </Text>
+        {flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) ? (
+        <View style={styles.contextTrail}>
+          {flagged ? (
+            <View
+              style={[styles.labelChip, styles.priceCheckChip]}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons name="alert-circle-outline" size={12} color={colors.medInk} />
+              <Text style={styles.priceCheckText}>{priceCheckChipText(check)}</Text>
+            </View>
+          ) : null}
+          {showSharp && sharp && !signalsMuted ? (
+            <View style={styles.labelChip}>
+              <SharpScorePill score={sharp.score} band={sharp.band} />
+            </View>
+          ) : null}
+          {showTier && pick.confidence_tier ? (
+            <View style={[styles.labelChip, styles.tierChip, tierBg(pick.confidence_tier)]}>
+              <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
+                {pick.confidence_tier}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        ) : null}
+      </View>
+      <View style={styles.betRow}>
+        <Text style={[styles.betLeft, quietHeadline && styles.betMuted]}>
+          {betHeadline}
+        </Text>
+        {lockedAmerican && quoteBookKey ? (
+          <Text style={[styles.betRight, quietHeadline && styles.betMuted]}>
+            {trueMinus(lockedAmerican)}
+            <Text style={styles.betBook}> {bookLabel(quoteBookKey)}</Text>
+          </Text>
+        ) : null}
+      </View>
+      {reasonLine ? (
+        <Text style={[styles.reasonLine, signalsMuted && styles.betMuted]}>{reasonLine}</Text>
+      ) : null}
+      {heroPrice?.showLockedCaption && (heroPrice.stale || heroPrice.untracked) ? (
+        <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
+      ) : null}
+      <View style={styles.edgeStakeRow}>
+        <View>
+          <Text style={[styles.metricValue, {
+            color: flagged || signalsMuted || pick.signal_type === 'NONE'
+              ? colors.textSecondary
+              : edgeColor,
+          }]}>
+            {edgeText}
+          </Text>
+          <Text style={styles.metricLabel}>Edge</Text>
+        </View>
+        <Text style={[styles.stakeInline, signalsStakeShown == null ? styles.metricMuted : null]}>
+          {signalsStakeShown ?? '—'}
+        </Text>
+      </View>
+      {myBooksNote ? (
+        <View style={styles.myBooksRow}>
+          <Ionicons
+            name={notAtMyBooks ? 'remove-circle-outline' : 'information-circle-outline'}
+            size={13}
+            color={colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text style={styles.myBooksText}>{trueMinus(myBooksNote)}</Text>
+        </View>
+      ) : null}
+      {stakeReason ? (
+        <View style={styles.stakeReasonRow}>
+          <Ionicons name="layers-outline" size={13} color={colors.textSecondary} style={styles.extraIcon} />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
+      ) : null}
+      {signalsMove ? (
+        <View style={styles.extraItem}>
+          <Ionicons name="warning-outline" size={13} color={colors.avoidInk} style={styles.extraIcon} />
+          <Text style={[styles.extraText, { color: colors.avoidInk, fontWeight: font.weight.medium }]}>{signalsMove}</Text>
+        </View>
+      ) : null}
+      {pick.injury_flag ? (
+        <View style={styles.extraItem}>
+          <Ionicons name="medkit-outline" size={13} color={colors.medInk} style={styles.extraIcon} />
+          <Text style={[styles.extraText, styles.injuryText]}>{pick.injury_flag}</Text>
+        </View>
+      ) : null}
+      {handoff || canTrack || canSlip || otherLinesControl ? (
+        <View style={styles.signalsActions}>
+          {signalsCta && handoff && signalsControl ? (
+            <BookControl
+              label={signalsCta}
+              speech={signalsCtaSpoken ?? signalsCta}
+              sheet={signalsControl.sheet}
+              onPress={() => {
+                if (signalsControl.sheet) setBooksOpen(true);
+                else void openBookBetslip(handoff.bookmaker, handoff.link);
+              }}
+            />
+          ) : otherLinesControl ? (
+            <BookControl
+              label={otherLinesControl.label}
+              speech={otherLinesControl.speech}
+              sheet
+              onPress={() => setBooksOpen(true)}
+            />
+          ) : (
+            <View />
+          )}
+          <View style={styles.actionsRight}>
+            {canSlip ? (
+              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} tall />
+            ) : null}
+            {canTrack ? (
+              <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} tall />
+            ) : null}
+          </View>
+        </View>
+      ) : null}
       </>
       )}
       {(leadRow && sheetBetLabel) || otherLinesControl ? (
@@ -1905,6 +2056,20 @@ const styles = StyleSheet.create({
   // Stake is its own row: "Bet 1.1u · Win 1u". Not a cell, not a "· 0.77u" suffix.
   stakeRow: {
     marginBottom: spacing.xs,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  // Trimmed Signals card: Edge on the left, "Bet Xu · Win Yu" on the right.
+  edgeStakeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  stakeInline: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,

@@ -345,8 +345,8 @@ def test_the_two_signal_counts_are_not_presented_as_a_subset():
     three, and the reader it misleads is the one adding up exposure.
     """
     src = _read(PICKS)
-    assert "pre-game signals" in src, (
-        "the Signals subtitle no longer says it is the pre-game board"
+    assert "pre-game picks" in src, (
+        "nothing still says Signals is the pre-game board"
     )
     assert "the two boards never hold the same pick" in src, (
         "nothing tells the reader the two signal counts are disjoint"

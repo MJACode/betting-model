@@ -25,6 +25,7 @@ import { combineBetslipLinks, combineSinglesLinks } from '../src/lib/betslipLink
 import {
   BET_ALL_LIVE_NOTE,
   betAllCandidates,
+  sportBetAllCandidates,
   betAllMainSkip,
   betAllSkipSummary,
   betAllSports,
@@ -35,7 +36,7 @@ import {
   planTotals,
   type BetAllPick,
 } from '../src/lib/betAll';
-import { passesActionFilter, stakeFor } from '../src/lib/thresholds';
+import { passesActionFilter, passesRecordFilter, stakeFor } from '../src/lib/thresholds';
 import type { EnrichedPick, Pick } from '../src/types';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -212,6 +213,53 @@ const none = betAllCandidates([live, avoid], () => null, ['draftkings']);
 check('live and non-BET rows are neither sent nor listed', none.picks.length === 0 && none.skipped.length === 0);
 check('the live call-out is the decided copy', BET_ALL_LIVE_NOTE === 'Pre-game signals only. Live bets aren’t included.');
 
+// A finished pick is not on the open board (useTodayPicks keeps it apart),
+// and a graded one is dropped by openForAction even if it is. The sport
+// sheet must still name it as started, and must not offer it.
+function signalRow(id: number, label: string, result: string | null, game: Record<string, unknown> | null): EnrichedPick {
+  return {
+    pick: {
+      ...pk(id, label),
+      signal_type: 'BET',
+      model_id: 'ncaab_live_spread_h1',
+      model_probability: 0.6,
+      edge: 0.08,
+      dk_odds: -110,
+      decision_odds: -110,
+      result,
+      is_live: false,
+      game_id: `g${id}`,
+      game_time: '2020-01-01T18:00:00Z',
+      sport: 'NCAAB',
+      condition_status: null,
+    },
+    game,
+    weather: null,
+    bookRows: [],
+  } as unknown as EnrichedPick;
+}
+const startedGame = { sport: 'NCAAB', commence_time: '2020-01-01T18:00:00Z', home_score: null, away_score: null };
+const finalGame = { sport: 'NCAAB', commence_time: '2020-01-01T18:00:00Z', home_score: 88, away_score: 85 };
+const pineBluff = signalRow(4, 'Arkansas-Pine Bluff +49.5', null, startedGame);
+const memphis = signalRow(5, 'Memphis -1.5', 'LOSS', finalGame);
+check('the started fixture clears its cut', passesActionFilter(pineBluff.pick));
+check('the graded final clears the record filter', passesRecordFilter(memphis.pick));
+const dropped = betAllCandidates([memphis], () => null, ['draftkings']);
+check('betAllCandidates alone drops a graded final', dropped.picks.length === 0 && dropped.skipped.length === 0);
+const sportSheet = sportBetAllCandidates([pineBluff], [memphis], () => null, ['draftkings']);
+const skip = (rows: { key: string; reason: string }[], id: string) => rows.find((r) => r.key === id);
+check('the open board’s started game is not included',
+  skip(sportSheet.skipped, '4')?.reason === 'started' && !sportSheet.picks.some((p) => p.key === '4'));
+check('the graded final the open board does not hold is not included as started',
+  skip(sportSheet.skipped, '5')?.reason === 'started' && sportSheet.skipped.find((s) => s.key === '5')?.label === 'Memphis -1.5');
+check('that final is not bettable and does not count as ready', !sportSheet.picks.some((p) => p.key === '5'));
+check('the note counts the final with the other started games',
+  betAllSkipSummary(sportSheet.skipped) === '2 not included: 2 games started');
+const alsoOnBoard = sportBetAllCandidates([pineBluff, memphis], [memphis], () => null, ['draftkings']);
+check('a final that is also on the open list is still only a skip',
+  !alsoOnBoard.picks.some((p) => p.key === '5') && skip(alsoOnBoard.skipped, '5')?.reason === 'started'
+  && alsoOnBoard.skipped.filter((s) => s.key === '5').length === 1);
+
 // ── wiring ──────────────────────────────────────────────────────────────
 const card = read('src/components/PickCard.tsx');
 const lib = read('src/lib/betAll.ts');
@@ -220,9 +268,9 @@ const sheet = read('src/components/BetAllSheet.tsx');
 check('PickCard reads the shared price view', card.includes('pickPriceView(item, liveState, myBooks, myBooksReady)'));
 check('Bet all reads the same price view', lib.includes('pickPriceView(item, liveState, myBooks, true)'));
 check('Bet all is offered on Signals only', home.includes("view === 'signals' && myBooksReady"));
-check('the board shows the live call-out beside the button', home.includes('{BET_ALL_LIVE_NOTE}'));
-check('the button keeps the "Bet all N" form at zero, never "See why" (Matt, 2026-11-15)',
-  home.includes('{`Bet all ${betAll.picks.length}`}') && !home.includes("'See why'"));
+check('the sheet note carries the live call-out', sheet.includes('{BET_ALL_LIVE_NOTE}'));
+check('the row says Bet all · N ready in the sport, never See why (Matt, 2026-11-27)',
+  home.includes('`Bet all · ${betAllReady} ready in ${sportDisplayName(sport)}`') && !home.includes("'See why'"));
 check('the sheet defaults to Best line', sheet.includes("useState<BetAllMode>('best')"));
 check('the best-line list uses the same book as the plan',
   sheet.includes('quoteForBestLine(p)') && sheet.includes('quoteForBestLine(p).bookmaker'));
@@ -252,8 +300,8 @@ check('the banner names every skip, most common first',
   betAllSkipSummary([{ reason: 'started' }, { reason: 'oldPrice' }, { reason: 'oldPrice' }]) === '3 not included: 2 old prices, 1 game started');
 check('one skip reads singular', betAllSkipSummary([{ reason: 'oldPrice' }]) === '1 not included: 1 old price');
 check('nothing skipped says nothing', betAllSkipSummary([]) === null);
-check('the banner says the skips whenever any are left out, not only at zero ready',
-  home.includes('betAll.skipped.length > 0 ? `${betAllSkipSummary(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}`'));
+check('the sheet says the skips whenever any are left out, not only at zero ready',
+  sheet.includes('skipped.length > 0 ? `${betAllSkipSummary(skipped)}. ${BET_ALL_LIVE_NOTE}`'));
 {
   const mk = (sport: string, id: number) => ({ pick: { sport, pick_id: id } as unknown as Pick });
   check('betAllSports counts only sports with a pick to send, each once (UX review)',
@@ -262,14 +310,20 @@ check('the banner says the skips whenever any are left out, not only at zero rea
 check('Bet all sports reads every sport’s signals, not the filtered tab',
   home.includes('const open = allData.filter(') && home.includes('betAllCandidates(open,'));
 check('Bet all sports leaves finished games out', home.includes("!== 'final',\n    );\n    return betAllCandidates(open"));
-check('the row shows only when READY picks span two or more sports', home.includes('const showBetAllSports = everySportCount >= 2;') && home.includes('{betAllEverySport && showBetAllSports ? ('));
+check('one row opens Bet all on this sport when there is anything to send or skip',
+  home.includes('const showBetAllRow =') && home.includes('{showBetAllRow ? (') && home.includes('onPress={() => setBetAllOpen(true)}'));
 check('the sheet’s candidates are not gated, and a sheet with none is closed (UX review)',
-  !home.includes('length >= 2 ? c : null') && home.includes('if (betAllScope != null && betAllSheet == null) setBetAllScope(null);'));
+  !home.includes('length >= 2 ? c : null') && home.includes('if (betAllOpen && betAllSheet == null) setBetAllOpen(false);'));
+check('the sheet opens on the current sport and does not remember the toggle',
+  sheet.includes("useState<'sport' | 'all'>('sport')") && sheet.includes("setScope('sport')"));
+check('the toggle counts ready picks only',
+  sheet.includes('sportCandidates.picks.length') && sheet.includes('allCandidates.picks.length')
+  && sheet.includes('All sports (${allReady})'));
 check('the banner and the sheet use one word for a skip', sheet.includes('>Not included</Text>'));
 check('the all-sports sheet groups rows by sport, not a prefix on the footnote',
   sheet.includes('bySport(ps).map(') && !sheet.includes('            {sportPrefix(p.pick)}\n'));
-check('the Bet all sports row keeps a bottom margin the chips’ reach stops at', /betAllSportsRow: \{[^}]*marginBottom: spacing\.sm/.test(home));
-check('the all-sports sheet names each pick’s sport', home.includes("showSport={betAllScope === 'all'}") && sheet.includes('const sportPrefix = (pick: Pick) =>'));
+check('the Bet all row keeps a bottom margin the chips’ reach stops at', /betAllReadyRow: \{[^}]*marginBottom: spacing\.sm/.test(home));
+check('the all-sports sheet names each pick’s sport', sheet.includes("const showSport = scope === 'all'") && sheet.includes('const sportPrefix = (pick: Pick) =>'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

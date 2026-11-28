@@ -31,7 +31,7 @@
  * default that produced the bug. The pure half lives in lib/pickFilterState.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { SORT_OPTIONS, type SortKey } from '@/lib/pickSort';
 import {
@@ -173,6 +173,14 @@ interface Props {
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
   itemNoun?: string;
+  /** Picks draws the search field and the Filters pill itself. */
+  externalChrome?: boolean;
+  filtersOpen?: boolean;
+  onFiltersOpenChange?: (open: boolean) => void;
+  onActiveCount?: (count: number) => void;
+  /** Signals keeps finished games in the Started group, so the Status copy
+   *  must not say they are hidden. */
+  finalsInStartedGroup?: boolean;
 }
 
 export function PickFilters({
@@ -206,8 +214,15 @@ export function PickFilters({
   onTrackedCutChange,
   showSignals = true,
   itemNoun = 'pick',
+  externalChrome = false,
+  filtersOpen,
+  onFiltersOpenChange,
+  onActiveCount,
+  finalsInStartedGroup = false,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = filtersOpen ?? uncontrolledOpen;
+  const setOpen = onFiltersOpenChange ?? setUncontrolledOpen;
 
   const presentCategories = useMemo(
     () => presentCategoriesFor(availableModelIds),
@@ -371,6 +386,7 @@ export function PickFilters({
     (trackedNarrowed ? 1 : 0) +
     (gamesNarrowed ? 1 : 0) +
     (searchActive ? 1 : 0);
+  useEffect(() => { onActiveCount?.(count); }, [onActiveCount, count]);
 
   const clearAll = () => {
     onChange(freshFilter());
@@ -413,6 +429,8 @@ export function PickFilters({
         search={search}
         onSearchChange={onSearchChange}
         searchPlaceholder="Search player or team"
+        hideSearch={externalChrome}
+        hideFilterButton={externalChrome}
         onOpenFilters={() => setOpen(true)}
         activeCount={count}
         pills={pills}
@@ -470,8 +488,10 @@ export function PickFilters({
         {stateCutBites ? (
           <FilterSection
             title="Status"
-            subtitle="Finished games stay hidden until you pick Final."
-            summary={stateSummary}
+            subtitle={finalsInStartedGroup
+              ? 'Finished games are in the Started group. Pick Final to show only those.'
+              : 'Finished games stay hidden until you pick Final.'}
+            summary={finalsInStartedGroup && stateSummary === 'Final hidden' ? 'In Started' : stateSummary}
             defaultOpen={statesNarrowed}
             onClear={statesNarrowed ? onClearGameStates : undefined}
           >
