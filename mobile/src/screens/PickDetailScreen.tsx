@@ -66,6 +66,7 @@ import {
   playerNameFromPickLabel,
   priceAgeFor,
   oneWayMarket,
+  pickTimingInfo,
   pickTitleText,
   propMarketForPick,
   onlyDecidingQuote,
@@ -508,6 +509,10 @@ function PickDetailContent({
   const detailStakeText = detailStake == null
     ? null
     : signalsStakeLine(formatUnits(detailStake.risk), formatUnits(detailStake.win));
+  const postedTiming = pickTimingInfo(pick);
+  const postedClock = postedTiming && postedTiming.label.startsWith(`${postedTiming.verb} `)
+    ? postedTiming.label.slice(postedTiming.verb.length + 1)
+    : null;
   const edgeColor = passesActionFilter(pick) && !noEdgeAtMine && myView?.status !== 'none'
     ? colors.gradeGood
     : pick.signal_type === 'AVOID'
@@ -613,7 +618,13 @@ function PickDetailContent({
           returnText={shownEv == null ? '—' : formatPctSigned(shownEv)}
           stakeText={detailStakeText}
         />
-        <AboutThisPick gameTime={gameTimeLabel(game?.commence_time ?? pick.game_time)} />
+        <AboutThisPick
+          chanceText={formatPct(pick.model_probability)}
+          returnText={shownEv == null ? '—' : formatPctSigned(shownEv)}
+          model={modelLongWithMark(pick.model_id)}
+          posted={postedTiming && postedClock ? { verb: postedTiming.verb, time: postedClock, spoken: postedTiming.label } : null}
+          gameTime={gameTimeLabel(game?.commence_time ?? pick.game_time)}
+        />
 
         <ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />
 
@@ -1061,20 +1072,39 @@ function Figure({ label, value, valueColor }: { label: string; value: string; va
   );
 }
 
-/** Game time is not on the header or the timing card. Model and posted already are. */
-function AboutThisPick({ gameTime }: { gameTime: string | null }) {
-  if (!gameTime) return null;
+/**
+ * Model chance, expected return, the model name and when it posted. The
+ * posted line is pickTimingInfo's own label ("Posted 10:05 AM ET" on a
+ * same-day post). Game time stays with them.
+ */
+function AboutThisPick({
+  chanceText,
+  returnText,
+  model,
+  posted,
+  gameTime,
+}: {
+  chanceText: string;
+  returnText: string;
+  model: string;
+  posted: { verb: string; time: string; spoken: string } | null;
+  gameTime: string | null;
+}) {
   return (
     <View style={styles.about}>
       <Text style={styles.aboutHeading} accessibilityRole="header">About this pick</Text>
-      <AboutRow label="Game time" value={gameTime} />
+      <AboutRow label="Model chance" value={chanceText} />
+      <AboutRow label="Expected return" value={returnText} />
+      <AboutRow label="Model" value={model} />
+      {posted ? <AboutRow label={posted.verb} value={posted.time} spoken={posted.spoken} /> : null}
+      {gameTime ? <AboutRow label="Game time" value={gameTime} /> : null}
     </View>
   );
 }
 
-function AboutRow({ label, value }: { label: string; value: string }) {
+function AboutRow({ label, value, spoken }: { label: string; value: string; spoken?: string }) {
   return (
-    <View style={styles.aboutRow}>
+    <View style={styles.aboutRow} accessible accessibilityLabel={spoken ?? `${label}, ${value}`}>
       <Text style={styles.aboutLabel}>{label}</Text>
       <Text style={styles.aboutValue}>{value}</Text>
     </View>

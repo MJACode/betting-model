@@ -302,7 +302,7 @@ def test_picks_home_no_fake_zeros_and_neutral_chips():
     # The All segment, and the header and count it carried, were removed
     # 2026-11-20 (Matt). A failed load still says "—", never 0.
     assert '<SubTabBtn label="All"' not in home
-    assert "count={todayUnknown ? null : live.length}" in home
+    assert "count={todayUnknown ? null : signalsOnBoard}" in home
     assert "count={liveUnknown ? null : liveData.length}" in home
     # The Signals subtitle is gone (Matt, 2026-11-27). The segment count is
     # what still reads "—" rather than 0 before the first load. Live keeps

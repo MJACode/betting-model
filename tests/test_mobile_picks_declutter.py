@@ -71,9 +71,31 @@ def test_trimmed_card_moves_model_chance_and_posted_time_to_detail():
     assert "modelChance: trimmed ? null" in card
     assert "About this pick" in detail
     assert "Model chance" in detail and "Expected return" in detail
+    assert 'label="Model"' in detail
+    assert "pickTimingInfo(pick)" in detail
+    assert "postedTiming.label" in detail
     assert 'label="Game time"' in detail
-    assert "modelLongWithMark(pick.model_id)" in detail
-    assert "<PickTimingCard" in detail
+
+
+def test_finals_count_on_the_chip_the_signals_tab_and_the_sport_sheet():
+    home = _read("screens/PicksHomeScreen.tsx")
+    assert "signalCountsBySport(allData)" in home
+    assert "counts[s] = (counts[s] ?? 0) + 1" in home
+    assert "const signalsOnBoard = live.length + finishedSignals.filter" in home
+    assert "count={todayUnknown ? null : signalsOnBoard}" in home
+    # Finals stay in the sport Bet all pool, so they are listed as started.
+    assert "const betAllPool = unsearched" in home
+    assert "unsearched.filter((d) => stateByItem.get(d) !== 'final')" not in home
+    # The money line still ignores a finished game.
+    assert "filtered.filter((d) => stateByItem.get(d) !== 'final')" in home
+
+
+def test_started_group_subtitle_and_finals_sort_last():
+    home = _read("screens/PicksHomeScreen.tsx")
+    row = _read("components/StartedPickRow.tsx")
+    assert "Betting is closed. Track still works." in home
+    assert "=== 'final' ? 1 : 0" in home
+    assert "numberOfLines={1}" not in row
 
 
 def test_search_is_an_icon_beside_filters_and_covers_all_sports():

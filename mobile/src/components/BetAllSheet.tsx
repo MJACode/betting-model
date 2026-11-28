@@ -376,9 +376,12 @@ export function BetAllSheet({
                   )}
                 />
               </View>
-              <Text style={styles.noteLine}>
-                {skipped.length > 0 ? `${betAllSkipSummary(skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
-              </Text>
+              <View style={styles.noteCard}>
+                <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+                <Text style={styles.noteLine}>
+                  {skipped.length > 0 ? `${betAllSkipSummary(skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
+                </Text>
+              </View>
               {scope === 'all' && skipped.length > 0 ? (
                 <Pressable
                   onPress={() => listRef.current?.scrollTo({ y: notIncludedY.current, animated: true })}
@@ -465,7 +468,7 @@ export function BetAllSheet({
                 )}
                 {skipped.length > 0 ? (
                   <View
-                    style={styles.group}
+                    style={[styles.group, styles.notIncluded]}
                     onLayout={(e) => { notIncludedY.current = e.nativeEvent.layout.y; }}
                   >
                     <Text style={styles.groupTitle}>Not included</Text>
@@ -638,10 +641,21 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   segment: { marginBottom: spacing.sm },
   scopeRow: { marginBottom: spacing.sm },
+  noteCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.bgElevated,
+  },
   noteLine: {
+    flex: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
+  notIncluded: { marginBottom: spacing.xxl },
   seeList: { minHeight: 44, justifyContent: 'center' },
   seeListText: { color: colors.tint, fontWeight: font.weight.semibold, fontSize: font.size.footnote },
   selectAll: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center' },

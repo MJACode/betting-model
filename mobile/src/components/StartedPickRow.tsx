@@ -71,12 +71,12 @@ export function StartedPickRow({
     >
       <View style={styles.body}>
         <View style={styles.titleRow}>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          <Text style={styles.title}>{title}</Text>
           {priceText ? <Text style={styles.price}>{priceText}</Text> : null}
         </View>
         <View style={styles.meta}>
           {matchup ? (
-            <Text style={styles.matchup} numberOfLines={1}>{matchup}</Text>
+            <Text style={styles.matchup}>{matchup}</Text>
           ) : null}
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
             <GameStatusPill

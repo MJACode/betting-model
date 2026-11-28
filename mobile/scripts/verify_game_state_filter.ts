@@ -166,8 +166,8 @@ check('the open board other surfaces read excludes finished games',
 check('finished games are returned apart', hook.includes('finishedData: board.finishedData'));
 check('the board merges them, and the status cut gates them',
   screen.includes('[...activeItems, ...finishedItems]') && /boardItems\.filter\(\(d\) => isDateSelected/.test(screen));
-check('Bet all reads the open subset, never a finished game',
-  screen.includes('betAllCandidates(openFiltered,') && !screen.includes('betAllCandidates(filtered,'));
+check('the staked total still ignores a finished game, and Bet all lists finals as not included',
+  screen.includes('return openFiltered.reduce(') && screen.includes('const betAllPool = unsearched'));
 check('the staked total reads the open subset',
   screen.includes('return openFiltered.reduce(') && !screen.includes('return filtered.reduce('));
 check('the open subset drops Final',

@@ -482,10 +482,25 @@ export function PicksHomeScreen() {
   // Signals per sport, across ALL sports (not just the selected one) — the
   // toggle badge. The boards show one sport at a time, so without this a user
   // parked on their usual sport never learns another has bets waiting.
-  const sportSignalCounts = useMemo(
-    () => signalCountsBySport(allData),
-    [allData, thresholdsRevision],
+  // Finished games are kept off `allData` (useTodayPicks). The Signals count
+  // and the sport-chip badge include them anyway: a final pick is still a
+  // signal, and it now lives in the Started group (Matt, 2026-11-28 review).
+  const finishedSignals = useMemo(
+    () => finishedData.filter((d) => {
+      const graded = d.pick.result === 'WIN' || d.pick.result === 'LOSS' || d.pick.result === 'PUSH';
+      return (graded ? passesRecordFilter(d.pick) : passesActionFilter(d.pick)) && !isUnlockedPreview(d.pick);
+    }),
+    [finishedData, thresholdsRevision],
   );
+  const sportSignalCounts = useMemo(() => {
+    const counts = signalCountsBySport(allData);
+    for (const d of finishedSignals) {
+      const s = d.pick.sport;
+      if (!s) continue;
+      counts[s] = (counts[s] ?? 0) + 1;
+    }
+    return counts;
+  }, [allData, finishedSignals, thresholdsRevision]);
   // A pick is only a SIGNAL once it's locked. Future-dated UFC/golf picks
   // re-score until game day — they show on Today as lines/previews but are
   // excluded here (and from every signal count) until they lock.
@@ -493,15 +508,15 @@ export function PicksHomeScreen() {
     () => todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)),
     [todayData, thresholdsRevision],
   );
+  const signalsOnBoard = live.length + finishedSignals.filter((d) => d.pick.sport === sport).length;
 
   const activeItems: EnrichedPick[] =
     view === 'live' ? liveData : view === 'scoreboard' ? [] : live;
 
   // Today's FINISHED games for this view (Matt, 2026-11-15: "filter on
-  // completed games from the day"). They join the board only through the
-  // Status filter's Final chip — the default selection leaves Final out — and
-  // never reach the header counts, the sport badges or Bet all, which read
-  // `live` / `allData` above. On Signals a graded pick is history, so it is
+  // completed games from the day"). The header count and the sport badge
+  // add them back (signalsOnBoard / sportSignalCounts). The sport Bet all
+  // sheet lists them as not included. On Signals a graded pick is history, so it is
   // cut by passesRecordFilter (the Record tab's test); an ungraded one by
   // passesActionFilter, as on the open board. Live and Scores have none.
   const finishedItems: EnrichedPick[] = useMemo(() => {
@@ -782,11 +797,10 @@ export function PicksHomeScreen() {
   // Bet all reads the board as filtered, so it sends what the member sees.
   // Signals only: Live Signals is never part of it (Matt, 2026-11-14).
   // Bet all follows the board's filters, not the search box: search covers
-  // every sport and must not shrink "ready in NCAAB".
-  const betAllPool = useMemo(
-    () => unsearched.filter((d) => stateByItem.get(d) !== 'final'),
-    [unsearched, stateByItem],
-  );
+  // every sport and must not shrink "ready in NCAAB". Finals stay in the
+  // pool so the sheet lists them under Not included as games started
+  // (betAllCandidates skips a game that has started). They are not ready.
+  const betAllPool = unsearched;
   const betAll = useMemo(
     () =>
       view === 'signals' && myBooksReady && !signalsLocked
@@ -926,6 +940,12 @@ export function PicksHomeScreen() {
       if (row.item.pick.is_live === true || kind === 'pre') main.push(row);
       else started.push(row.item);
     }
+    // Finals sort last. The rest keep the board's order.
+    started.sort((a, b) => {
+      const af = startedBoardKind(a.game, liveStates.get(a.pick.game_id) ?? null, scoreFeeds.get(a.pick.game_id) ?? null) === 'final' ? 1 : 0;
+      const bf = startedBoardKind(b.game, liveStates.get(b.pick.game_id) ?? null, scoreFeeds.get(b.pick.game_id) ?? null) === 'final' ? 1 : 0;
+      return af - bf;
+    });
     return { mainRows: dropEmptyDayHeaders(main), startedRows: started };
   }, [groupStarted, listRows, liveStates, scoreFeeds]);
   const mainHasPicks = mainRows.some((r) => r.kind === 'item');
@@ -1159,7 +1179,7 @@ export function PicksHomeScreen() {
           contentContainerStyle={[styles.subTabsScroll, subTabsReach.content]}
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
-            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="Signals" count={todayUnknown ? null : signalsOnBoard} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -1587,7 +1607,9 @@ function StartedGroup({
         style={({ pressed }) => [styles.startedHeader, pressed && styles.betAllPressed]}
       >
         <Text style={styles.startedTitle}>{`Started (${rows.length})`}</Text>
-        <Text style={styles.startedHint}>Games under way or final</Text>
+        <Text style={styles.startedHint}>
+          {expanded ? 'Betting is closed. Track still works.' : 'Games under way or final'}
+        </Text>
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} />
       </Pressable>
       {expanded ? rows.map((item) => {
