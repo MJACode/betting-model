@@ -355,10 +355,9 @@ check('zeros: useTodayPicks / useLivePicks expose `loaded`, set only on success'
   /setLoaded\(true\);\s*\} catch/.test(read('src/hooks/useTodayPicks.ts')) && /setLoaded\(true\);\s*\} catch/.test(read('src/hooks/useLivePicks.ts')));
 check('zeros: PicksHome feeds `loaded` into both unknown flags',
   /knownCount\(0, \{ loaded, error,/.test(home) && /knownCount\(0, \{ loaded: liveLoaded, error: liveError,/.test(home));
-check('zeros: a failed Signals header reads — pre-game signals', /`\$\{date\} · — pre-game signals`/.test(home));
 check('zeros: tabs read (—) while unknown', /count=\{todayUnknown \? null : live\.length\}/.test(home) && /count=\{liveUnknown \? null : liveData\.length\}/.test(home));
-check('zeros: Signals and Live headers do not print 0 while unknown',
-  /\$\{todayUnknown \? '—' : live\.length\} pre-game signals/.test(home) && /liveUnknown\s*\? '— in play'/.test(home));
+check('zeros: the Signals subtitle is gone and Live still reads — while unknown',
+  !/pre-game signals/.test(home) && /liveUnknown\s*\? '— in play'/.test(home));
 check('chips: PicksHome passes sportChipsAvailable(availableSports, known)',
   /available=\{sportChipsAvailable\(availableSports, !todayUnknown && !liveUnknown\)\}/.test(home) && !/available=\{availableSports\}/.test(home));
 const toggle = read('src/components/SportToggle.tsx');

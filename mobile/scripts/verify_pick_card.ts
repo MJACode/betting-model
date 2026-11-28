@@ -1495,7 +1495,7 @@ check(
         liveGame.homeScore === 3 &&
         liveGame.inning === 7 &&
         between.includes('<GameStatusPill') &&
-        between.includes("kind !== 'pre'") &&
+        /kind !== 'pre'/.test(card) &&
         !/numberOfLines/.test(between),
     );
   }
@@ -1520,7 +1520,8 @@ check(
   check(
     'a paused Signals card shows PAUSED and mutes the hero',
     /signalsMuted = signals && \(flagged \|\| Boolean\(heroPrice\?\.stale\) \|\| paused\)/.test(card) &&
-      card.split('>PAUSED<').length === 3,
+      // Board, the full Signals card, and the trimmed Signals card (Matt, 2026-11-27).
+      card.split('>PAUSED<').length === 4,
   );
   {
     const signalsJsx = card.slice(card.indexOf('styles.contextRow'));

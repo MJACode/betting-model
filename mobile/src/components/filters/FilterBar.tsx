@@ -50,6 +50,9 @@ interface Props {
 
   /** Quick chips row (sort, category shortcuts, …). */
   children?: React.ReactNode;
+  /** Picks draws search and Filters beside the sport chips. */
+  hideSearch?: boolean;
+  hideFilterButton?: boolean;
 }
 
 export function FilterBar({
@@ -62,13 +65,17 @@ export function FilterBar({
   onClearAll,
   countLabel,
   children,
+  hideSearch = false,
+  hideFilterButton = false,
 }: Props) {
-  const showSearch = onSearchChange != null;
+  const showSearch = onSearchChange != null && !hideSearch;
   const showPills = pills.length > 0;
+  if (!showSearch && hideFilterButton && !children && !showPills) return null;
 
+  const showTop = showSearch || !hideFilterButton || Boolean(children);
   return (
     <View style={styles.wrap}>
-      <View style={styles.topRow}>
+      {showTop ? <View style={styles.topRow}>
         {showSearch ? (
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={15} color={colors.textTertiary} />
@@ -98,7 +105,7 @@ export function FilterBar({
           <View style={styles.searchWrap} />
         )}
 
-        <Pressable
+        {hideFilterButton ? null : <Pressable
           onPress={onOpenFilters}
           accessibilityRole="button"
           accessibilityLabel={
@@ -117,8 +124,8 @@ export function FilterBar({
               <Text style={styles.badgeText}>{activeCount}</Text>
             </View>
           ) : null}
-        </Pressable>
-      </View>
+        </Pressable>}
+      </View> : null}
 
       {children ? <View style={styles.quickRow}>{children}</View> : null}
 

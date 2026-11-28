@@ -9,6 +9,7 @@ import {
   BET_ALL_LIVE_NOTE,
   BET_ALL_SINGLES_NOTE,
   BET_ALL_SKIP_TEXT,
+  betAllSkipSummary,
   bestLinePlan,
   bookCoverage,
   quoteForBestLine,
@@ -35,11 +36,12 @@ import { sportDisplayName } from '@/lib/liveSports';
 
 interface Props {
   visible: boolean;
-  sport: string;
-  /** Name each pick's sport on its row: the all-sports sheet holds several
-   *  (Matt, 2026-11-27), and a label alone does not say which. */
-  showSport?: boolean;
-  candidates: BetAllCandidates;
+  /** The sport the board is on, as a reader says it ("NCAAB"). */
+  sportLabel: string;
+  /** Ready and skipped picks for the sport on screen. */
+  sportCandidates: BetAllCandidates;
+  /** Ready and skipped picks across every sport. Board filters don't apply. */
+  allCandidates: BetAllCandidates;
   myBooks: readonly string[];
   /** Whether a pick is already in the member's tracked bets
    *  (useTrackedBets.isTracked). The tick on each pick reads this, so a
@@ -83,9 +85,27 @@ function stakeText(risk: number, win: number): string {
  * than one pick has a "Placed all" shortcut. Nothing waits for an answer, so
  * closing the sheet never loses a placed bet and never needs a warning.
  */
-export function BetAllSheet({ visible, sport, showSport = false, candidates, myBooks, isTracked, onTrack, onUntrack, onClose }: Props) {
+export function BetAllSheet({
+  visible,
+  sportLabel,
+  sportCandidates,
+  allCandidates,
+  myBooks,
+  isTracked,
+  onTrack,
+  onUntrack,
+  onClose,
+}: Props) {
   const insets = useSafeAreaInsets();
+  // Opens on the sport you're viewing, every time. The choice is not kept
+  // (Matt, 2026-11-27).
+  const [scope, setScope] = useState<'sport' | 'all'>('sport');
+  const showSport = scope === 'all';
+  const candidates = scope === 'all' ? allCandidates : sportCandidates;
   const { picks: allPicks, skipped } = candidates;
+  const sportReady = sportCandidates.picks.length;
+  const allReady = allCandidates.picks.length;
+  const readyCount = allPicks.length;
   const [mode, setMode] = useState<BetAllMode>('best');
   // EVERY PICK ON THE BOARD, TRACKED ONES INCLUDED (Matt, 2026-11-21,
   // replacing the same day's "Untracked only" switch once the board gained
@@ -103,18 +123,34 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
   const [steps, setSteps] = useState<BetAllStep[]>([]);
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const awaiting = useRef<string | null>(null);
+  const listRef = useRef<ScrollView>(null);
+  const notIncludedY = useRef(0);
   // Tracked picks that are ticked: named above the button so a bet already
   // placed is never sent to a book again unnoticed (UX review, 2026-11-21).
   // Read AFTER `selected` is declared: above it, the shipped bundle reads
   // `selected` as undefined and every open of the sheet crashed (2026-11-21).
   const trackedTicked = picks.filter((p) => selected.has(p.key) && isTracked(p.pick)).length;
 
-  // A fresh sheet every time it opens: every pick ticked, Best line.
-  const pickKeys = allPicks.map((p) => p.key).join(',');
+  // Checks are per pick and survive the sport / All sports toggle. A pick
+  // ticked on NCAAB stays ticked on All sports. Keys from both scopes start
+  // ticked, so a pick you have not seen yet is on, and one you unticked stays
+  // off when you switch back (Matt, 2026-11-27).
+  const unionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const p of sportCandidates.picks) keys.add(p.key);
+    for (const p of allCandidates.picks) keys.add(p.key);
+    return keys;
+  }, [sportCandidates, allCandidates]);
+  const unionKeyStr = useMemo(() => [...unionKeys].sort().join(','), [unionKeys]);
+  // A fresh sheet every time it opens: current sport, every pick ticked, Best line.
   useEffect(() => {
     if (!visible) return;
+    setScope('sport');
     setMode('best');
-    setSelected(new Set(allPicks.map((p) => p.key)));
+    const keys = new Set<string>();
+    for (const p of sportCandidates.picks) keys.add(p.key);
+    for (const p of allCandidates.picks) keys.add(p.key);
+    setSelected(keys);
     setBook(null);
     setPhase('choose');
     setSteps([]);
@@ -122,11 +158,12 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
     awaiting.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-  // A pick that leaves the board (its game started) leaves the selection.
+  // A pick that leaves both scopes (its game started) leaves the selection.
+  // Switching scope does not: the key is still in the union, ticked or not.
   useEffect(() => {
-    setSelected((prev) => new Set([...prev].filter((k) => allPicks.some((p) => p.key === k))));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickKeys]);
+    const union = new Set(unionKeyStr.length === 0 ? [] : unionKeyStr.split(','));
+    setSelected((prev) => new Set([...prev].filter((k) => union.has(k))));
+  }, [unionKeyStr]);
 
   // Back from a book: no question, only a spoken nudge for VoiceOver (iOS
   // has no live regions), since a sighted member sees the ticks.
@@ -308,13 +345,15 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
           <View style={styles.header}>
             <View style={styles.headerBody}>
               <Text style={styles.title} accessibilityRole="header">
-                {phase === 'choose' ? `Bet all · ${sport}` : `Bet all · ${placedLegs} of ${totalLegs} tracked`}
+                {phase === 'choose'
+                  ? `Bet all · ${readyCount} ${readyCount === 1 ? 'pick' : 'picks'}`
+                  : `Bet all · ${placedLegs} of ${totalLegs} tracked`}
               </Text>
               <Text style={styles.subtitle}>
                 {phase === 'choose'
-                  ? showSport
-                    ? `Every sport’s signals. Board filters don’t apply. ${BET_ALL_LIVE_NOTE}`
-                    : BET_ALL_LIVE_NOTE
+                  ? scope === 'sport'
+                    ? `${sportLabel} signals only.`
+                    : 'Every sport’s signals. Board filters don’t apply.'
                   : 'Tick each bet once you’ve placed it to track it.'}
               </Text>
             </View>
@@ -325,6 +364,31 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
 
           {phase === 'choose' ? (
             <>
+              <View style={styles.scopeRow}>
+                <SegmentTabs
+                  items={['sport', 'all'] as const}
+                  active={scope}
+                  onChange={setScope}
+                  fit
+                  labelFor={(item) => (item === 'sport' ? `${sportLabel} (${sportReady})` : `All sports (${allReady})`)}
+                  accessibilityLabelFor={(item) => (
+                    item === 'sport' ? `${sportLabel}, ${sportReady} ready` : `All sports, ${allReady} ready`
+                  )}
+                />
+              </View>
+              <Text style={styles.noteLine}>
+                {skipped.length > 0 ? `${betAllSkipSummary(skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
+              </Text>
+              {scope === 'all' && skipped.length > 0 ? (
+                <Pressable
+                  onPress={() => listRef.current?.scrollTo({ y: notIncludedY.current, animated: true })}
+                  accessibilityRole="link"
+                  accessibilityLabel="See list of picks not included"
+                  style={styles.seeList}
+                >
+                  <Text style={styles.seeListText}>See list</Text>
+                </Pressable>
+              ) : null}
               <View style={styles.segment}>
                 <SegmentTabs
                   items={['best', 'book'] as const}
@@ -376,7 +440,7 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
                 </ScrollView>
               ) : null}
 
-              <ScrollView style={styles.list} bounces={false}>
+              <ScrollView ref={listRef} style={styles.list} bounces={false}>
                 {mode === 'best' ? (
                   bestGroups.map((g) => (
                     <View key={g.key} style={styles.group}>
@@ -400,7 +464,10 @@ export function BetAllSheet({ visible, sport, showSport = false, candidates, myB
                   </View>
                 )}
                 {skipped.length > 0 ? (
-                  <View style={styles.group}>
+                  <View
+                    style={styles.group}
+                    onLayout={(e) => { notIncludedY.current = e.nativeEvent.layout.y; }}
+                  >
                     <Text style={styles.groupTitle}>Not included</Text>
                     <View style={styles.card}>
                       {skipped.map((s, i) => (
@@ -570,6 +637,13 @@ const styles = StyleSheet.create({
   title: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary },
   subtitle: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   segment: { marginBottom: spacing.sm },
+  scopeRow: { marginBottom: spacing.sm },
+  noteLine: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  seeList: { minHeight: 44, justifyContent: 'center' },
+  seeListText: { color: colors.tint, fontWeight: font.weight.semibold, fontSize: font.size.footnote },
   selectAll: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center' },
   markPlaced: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   chips: { flexGrow: 0, marginBottom: spacing.md },

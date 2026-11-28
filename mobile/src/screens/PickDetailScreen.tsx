@@ -43,7 +43,8 @@ import { openForAction } from '@/lib/discordPublish';
 import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
-  basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, isVersusSport,
+  basesLabel, expectedValue, formatAmerican, formatGameTimeET, formatPct, formatPctSigned,
+  formatSigned, gameDayLabelET, gameStatus, isVersusSport,
 } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, isPropModel, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
@@ -81,20 +82,20 @@ import {
   NOT_AT_MY_BOOKS_AT_THIS_LINE,
   recordNoteFor,
 } from '@/lib/myBooks';
-import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
+import { formatUnits, isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview, passesActionFilter, stakeFor } from '@/lib/thresholds';
 import { hasMatchupView } from '@/lib/gameMatchup';
 import { colors, font, pnlColor, radii, spacing, sectionHeaderText, opacity, cardDense } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
 import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
 import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
-import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { hitModeFromPickSide } from '@/lib/hitMode';
 import { thresholdFromBookLine } from '@/lib/playerDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { pickSportsbookRows } from '@/lib/pickBooks';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
-import { signalsBetHeadline, signalsCtaLabel, signalsCtaSpeech, signalsNowLine } from '@/lib/signalsCard';
+import { signalsBetHeadline, signalsCtaLabel, signalsCtaSpeech, signalsNowLine, signalsStakeLine } from '@/lib/signalsCard';
 
 /** Tokens already used to open the sheet. Survives a remount of this
  *  screen (the premium gate's hold spinner) so the sheet does not reopen
@@ -493,6 +494,25 @@ function PickDetailContent({
     : isVersusSport(game?.sport ?? pick.sport)
       ? `${game?.away_team ?? ''} vs ${game?.home_team ?? ''}`
       : `${game?.away_team ?? ''} @ ${game?.home_team ?? ''}`;
+  const shownEdge = myView?.status === 'mine' && myView.edge != null ? myView.edge : decisionEdge(pick);
+  const shownEv = myView?.status === 'mine' ? myView.ev : expectedValue(pick.model_probability, decisionOdds(pick));
+  // Same price the Signals card sizes at: the member's book when that is the
+  // price on screen, otherwise the decision price. Hidden in the same cases
+  // the card hides a stake (UX review).
+  const noEdgeAtMine = myView?.status === 'mine' && (myView.edge ?? 0) <= 0;
+  const stakePrice = myView?.status === 'mine' ? myView.best?.price ?? null : decisionOdds(pick);
+  const detailStake = paused || preview || pick.signal_type !== 'BET'
+    || myView?.status === 'none' || noEdgeAtMine || hero?.stale || stakePrice == null
+    ? null
+    : stakeFor(pick.kelly_fraction, stakePrice, pick.stake_units);
+  const detailStakeText = detailStake == null
+    ? null
+    : signalsStakeLine(formatUnits(detailStake.risk), formatUnits(detailStake.win));
+  const edgeColor = passesActionFilter(pick) && !noEdgeAtMine && myView?.status !== 'none'
+    ? colors.gradeGood
+    : pick.signal_type === 'AVOID'
+      ? colors.gradeBad
+      : colors.textSecondary;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -585,6 +605,15 @@ function PickDetailContent({
           ) : null}
           {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
+
+        <PickFigures
+          edgeText={formatPctSigned(shownEdge)}
+          edgeColor={edgeColor}
+          chanceText={formatPct(pick.model_probability)}
+          returnText={shownEv == null ? '—' : formatPctSigned(shownEv)}
+          stakeText={detailStakeText}
+        />
+        <AboutThisPick gameTime={gameTimeLabel(game?.commence_time ?? pick.game_time)} />
 
         <ReasoningCard pick={pick} paused={paused} stale={hero?.stale === true} />
 
@@ -991,6 +1020,67 @@ function ClvCard({ pick }: { pick: Pick }) {
   );
 }
 
+function gameTimeLabel(iso: string | null | undefined): string | null {
+  const day = gameDayLabelET(iso);
+  const time = formatGameTimeET(iso);
+  const text = [day, time].filter((part) => part && part.length > 0).join(' ');
+  return text.length > 0 ? text : null;
+}
+
+/** Edge stays. Model chance and expected return moved here off the Signals card.
+ *  Model name and posted time already have a home on this screen. */
+function PickFigures({
+  edgeText,
+  edgeColor,
+  chanceText,
+  returnText,
+  stakeText,
+}: {
+  edgeText: string;
+  edgeColor: string;
+  chanceText: string;
+  returnText: string;
+  stakeText: string | null;
+}) {
+  return (
+    <View style={styles.figures}>
+      <Figure label="Edge" value={edgeText} valueColor={edgeColor} />
+      <Figure label="Model chance" value={chanceText} />
+      <Figure label="Expected return" value={returnText} />
+      {stakeText ? <Figure label="Stake" value={stakeText} /> : null}
+    </View>
+  );
+}
+
+function Figure({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <View style={styles.figure} accessible accessibilityLabel={`${label}, ${value}`}>
+      <Text style={styles.figureLabel}>{label}</Text>
+      <Text style={[styles.figureValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
+    </View>
+  );
+}
+
+/** Game time is not on the header or the timing card. Model and posted already are. */
+function AboutThisPick({ gameTime }: { gameTime: string | null }) {
+  if (!gameTime) return null;
+  return (
+    <View style={styles.about}>
+      <Text style={styles.aboutHeading} accessibilityRole="header">About this pick</Text>
+      <AboutRow label="Game time" value={gameTime} />
+    </View>
+  );
+}
+
+function AboutRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.aboutRow}>
+      <Text style={styles.aboutLabel}>{label}</Text>
+      <Text style={styles.aboutValue}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1233,5 +1323,42 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     color: colors.textPrimary,
     fontWeight: font.weight.medium,
+  },
+  figures: {
+    ...cardDense,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  figure: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    minHeight: 32,
+  },
+  figureValue: {
+    flexShrink: 0,
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  figureLabel: { fontSize: font.size.footnote, color: colors.textSecondary },
+  about: {
+    ...cardDense,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  aboutHeading: { ...sectionHeaderText, marginBottom: spacing.xs },
+  aboutRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
+  aboutLabel: { fontSize: font.size.footnote, color: colors.textSecondary },
+  aboutValue: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
   },
 });

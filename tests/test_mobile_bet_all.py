@@ -47,8 +47,9 @@ def test_bet_all_and_the_card_share_one_price_view():
 
 def test_signals_only_with_the_live_call_out():
     home = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
+    sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
     assert "view === 'signals' && myBooksReady" in home
-    assert "{BET_ALL_LIVE_NOTE}" in home
+    assert "{BET_ALL_LIVE_NOTE}" in sheet
     lib = _read(MOBILE / "src" / "lib" / "betAll.ts")
     assert "if (pick.is_live === true) continue;" in lib
 
@@ -101,8 +102,11 @@ def test_bet_all_lists_tracked_picks_like_the_board():
     assert 'accessibilityLabel="Untracked only"' not in sheet
     assert "!isTracked(p.pick)" not in sheet
     assert ">Tracking</Text>" in sheet
-    # Every pick, tracked or not, starts ticked.
-    assert "setSelected(new Set(allPicks.map((p) => p.key)));" in sheet
+    # Every pick, tracked or not, starts ticked — both scopes, so the
+    # sport / All sports toggle does not drop a tick (Matt, 2026-11-27).
+    assert "for (const p of sportCandidates.picks) keys.add(p.key);" in sheet
+    assert "for (const p of allCandidates.picks) keys.add(p.key);" in sheet
+    assert "setSelected(keys);" in sheet
     # A ticked tracked pick is named above the button (UX review).
     assert "you’re already tracking ${trackedTicked === 1 ? 'is' : 'are'} included" in sheet
     # Send-step progress counts only legs placed in this run.

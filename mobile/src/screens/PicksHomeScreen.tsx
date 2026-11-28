@@ -60,6 +60,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -68,6 +69,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
+import { StartedPickRow } from '@/components/StartedPickRow';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import {
@@ -112,7 +114,8 @@ import {
 } from '@/lib/trackedFilter';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { BetAllSheet } from '@/components/BetAllSheet';
-import { BET_ALL_LIVE_NOTE, betAllCandidates, betAllSkipSummary, betAllSports } from '@/lib/betAll';
+import { betAllCandidates } from '@/lib/betAll';
+import { startedBoardKind } from '@/lib/startedBoard';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { LIVE_PRICE_SLOT_ONLY } from '@/lib/markets';
@@ -203,9 +206,9 @@ export function PicksHomeScreen() {
   const slip = useParlaySlip();
   // Bet all (Matt, 2026-11-14): the member's books decide what it can send.
   const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
-  // Which Bet all sheet is open: this sport's board as filtered, or every
-  // sport's signals (Matt, 2026-11-27). Null when closed.
-  const [betAllScope, setBetAllScope] = useState<'sport' | 'all' | null>(null);
+  // Bet all opens on the sport you're viewing. The sheet's own toggle
+  // reaches every sport, and that choice is not kept (Matt, 2026-11-27).
+  const [betAllOpen, setBetAllOpen] = useState(false);
 
   const [view, setView] = useState<PicksView>('signals');
   const [sbSport, setSbSport] = useState<ScoreboardSport>('NFL');
@@ -217,6 +220,12 @@ export function PicksHomeScreen() {
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
+  // The search field replaces the sport chips and the segments (Matt, 2026-11-27).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [startedOpen, setStartedOpen] = useState(false);
+  const searchRef = useRef<TextInput>(null);
+  const [filterCount, setFilterCount] = useState(0);
 
   // The pre-game boards reload while they are open, so "line now" is the
   // book's line now and not the one from when the screen first loaded (Matt,
@@ -360,6 +369,8 @@ export function PicksHomeScreen() {
   useEffect(() => {
     setFilter(freshFilter());
     setSearch('');
+    setSearchOpen(false);
+    setStartedOpen(false);
     // And the live board's previous count is FORGOTTEN, because `liveData` is
     // sport-scoped: without this, a reader on 3 MLB live picks who taps NBA goes
     // 3 -> 0 and gets told "Last in-play game finished". Nothing finished; they
@@ -511,7 +522,13 @@ export function PicksHomeScreen() {
 
   // Score + clock for every started non-MLB game on the board, from the feeds
   // the Scoreboard tab reads (Matt, 2026-11-24). MLB comes from liveStates.
-  const { byGame: scoreFeeds } = useCardScoreFeeds(boardItems.map((d) => d.game));
+  // A typed search covers every sport, so those games need a score too.
+  const searchingAll = searchOpen && search.trim().length > 0 && view !== 'scoreboard';
+  const feedGames = useMemo(
+    () => (searchingAll ? [...allData, ...finishedData, ...liveData] : boardItems).map((d) => d.game),
+    [searchingAll, allData, finishedData, liveData, boardItems],
+  );
+  const { byGame: scoreFeeds } = useCardScoreFeeds(feedGames);
 
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
@@ -612,15 +629,23 @@ export function PicksHomeScreen() {
   const clearStates = useCallback(() => setPickedStates(new Set()), []);
   // The "N/M" count's M: what the Status cut lets onto the board, so the
   // finished games the default hides do not read as filtered out.
+  // Signals: a finished game renders in the Started group, so the default
+  // Status cut (Final not picked) no longer hides it. An explicit cut still
+  // does. Live Signals keeps the old rule.
+  const finalsInStartedGroup = view === 'signals' && selectedStates.size === 0;
   const statusPoolSize = useMemo(() => {
-    const finalShown = selectedStates.has('final');
+    const finalShown = selectedStates.has('final') || finalsInStartedGroup;
     let n = 0;
     for (const st of stateByItem.values()) if (finalShown || st !== 'final') n += 1;
     return n;
-  }, [stateByItem, selectedStates]);
+  }, [stateByItem, selectedStates, finalsInStartedGroup]);
   const statusOk = useCallback(
-    (d: EnrichedPick) => isGameStateSelected(stateByItem.get(d) ?? 'upcoming', selectedStates),
-    [stateByItem, selectedStates],
+    (d: EnrichedPick) => {
+      const st = stateByItem.get(d) ?? 'upcoming';
+      if (st === 'final' && finalsInStartedGroup) return true;
+      return isGameStateSelected(st, selectedStates);
+    },
+    [stateByItem, selectedStates, finalsInStartedGroup],
   );
 
   // The Tracked cut (Matt, 2026-11-21: "show bets that have not been placed
@@ -756,12 +781,18 @@ export function PicksHomeScreen() {
   );
   // Bet all reads the board as filtered, so it sends what the member sees.
   // Signals only: Live Signals is never part of it (Matt, 2026-11-14).
+  // Bet all follows the board's filters, not the search box: search covers
+  // every sport and must not shrink "ready in NCAAB".
+  const betAllPool = useMemo(
+    () => unsearched.filter((d) => stateByItem.get(d) !== 'final'),
+    [unsearched, stateByItem],
+  );
   const betAll = useMemo(
     () =>
-      view === 'signals' && myBooksReady
-        ? betAllCandidates(openFiltered, (id) => liveStates.get(id) ?? null, myBooks)
+      view === 'signals' && myBooksReady && !signalsLocked
+        ? betAllCandidates(betAllPool, (id) => liveStates.get(id) ?? null, myBooks)
         : null,
-    [view, myBooksReady, openFiltered, liveStates, myBooks, thresholdsRevision],
+    [view, myBooksReady, signalsLocked, betAllPool, liveStates, myBooks, thresholdsRevision],
   );
   // Bet all across EVERY sport (Matt, 2026-11-27: one tap for every signal,
   // not one per sport tab). It reads the signals themselves, not this tab's
@@ -778,14 +809,18 @@ export function PicksHomeScreen() {
     );
     return betAllCandidates(open, (id) => liveStates.get(id) ?? null, myBooks);
   }, [view, myBooksReady, signalsLocked, allData, liveStates, myBooks, thresholdsRevision]);
-  const everySportCount = betAllEverySport ? betAllSports(betAllEverySport).length : 0;
-  const showBetAllSports = everySportCount >= 2;
-  const betAllSheet = betAllScope === 'all' ? betAllEverySport : betAllScope === 'sport' ? betAll : null;
+  const betAllReady = betAll?.picks.length ?? 0;
+  const showBetAllRow =
+    betAll != null &&
+    (betAll.picks.length + betAll.skipped.length > 0 || (betAllEverySport?.picks.length ?? 0) > 0);
+  const betAllSheet = betAll != null && betAllEverySport != null
+    ? { sport: betAll, all: betAllEverySport }
+    : null;
   // A sheet whose candidates went away (left Signals, books reloading) is
   // closed, so it never reopens later without a tap (UX review, 2026-11-27).
   useEffect(() => {
-    if (betAllScope != null && betAllSheet == null) setBetAllScope(null);
-  }, [betAllScope, betAllSheet]);
+    if (betAllOpen && betAllSheet == null) setBetAllOpen(false);
+  }, [betAllOpen, betAllSheet]);
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
@@ -822,6 +857,83 @@ export function PicksHomeScreen() {
         : sorted.map((d) => ({ kind: 'item' as const, key: String(d.pick.pick_id), item: d })),
     [filtered, sorted, sortKey, thresholdsRevision],
   );
+
+  // Search covers every sport (Matt, 2026-11-27). Filters other than the
+  // sport chip still apply. A game picked on this sport does not hide the
+  // other sports.
+  const searchRows: DayRow<EnrichedPick>[] | null = useMemo(() => {
+    if (!searchingAll) return null;
+    const signals = allData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick));
+    const finished = finishedData.filter((d) => {
+      const graded = d.pick.result === 'WIN' || d.pick.result === 'LOSS' || d.pick.result === 'PUSH';
+      return (graded ? passesRecordFilter(d.pick) : passesActionFilter(d.pick)) && !isUnlockedPreview(d.pick);
+    });
+    // In-play picks stay searchable. A search opened from Live Signals would
+    // otherwise hide the pick the member was looking at.
+    const seen = new Set<string>();
+    const pool = [...signals, ...finished, ...liveData].filter((d) => {
+      const id = String(d.pick.pick_id);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      if (!isDateSelected(d.pick.game_date, selectedDates)) return false;
+      if (!passesTrackedCut(trackedCut, tracked.isTracked(d.pick))) return false;
+      if (d.pick.sport === sport && !isGameSelected(d.pick.game_id, gamePicker.selected)) return false;
+      const st = gameStateOf(gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null));
+      if (st === 'final' && selectedStates.size === 0) return true;
+      if (!isGameStateSelected(st, selectedStates)) return false;
+      return true;
+    });
+    const cut = applyFilter(pool, cutFilter).filter(
+      (d) => displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick),
+    );
+    const hits = searchPicks(cut, search);
+    const ordered = sortPicks(hits, sortKey === 'time' ? 'time' : sortKey, {
+      priceCheck: (d) => priceCheckForItem(d, liveStates.get(d.pick.game_id) ?? null).flagged,
+    });
+    const pausedLast = [
+      ...ordered.filter((d) => !isPausedForDisplay(d.pick)),
+      ...ordered.filter((d) => isPausedForDisplay(d.pick)),
+    ];
+    return sortKey === 'time'
+      ? rowsByDay(pausedLast, (d) => d.pick.game_date, (d) => String(d.pick.pick_id), (d) => isPausedForDisplay(d.pick))
+      : pausedLast.map((d) => ({ kind: 'item' as const, key: String(d.pick.pick_id), item: d }));
+    // tracked.isTracked is rebuilt every render; ids + live are its inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    searchingAll, allData, finishedData, liveData, selectedDates, trackedCut, trackedIds, trackedLive,
+    selectedStates, sport, gamePicker.selected, cutFilter, displayFilter, search, sortKey,
+    liveStates, thresholdsRevision,
+  ]);
+
+  const listRows = searchRows ?? rows;
+  const groupStarted = view === 'signals' || searchingAll;
+  const { mainRows, startedRows } = useMemo(() => {
+    if (!groupStarted) return { mainRows: listRows, startedRows: [] as EnrichedPick[] };
+    const started: EnrichedPick[] = [];
+    const main: DayRow<EnrichedPick>[] = [];
+    for (const row of listRows) {
+      if (row.kind === 'day') {
+        main.push(row);
+        continue;
+      }
+      const kind = startedBoardKind(
+        row.item.game,
+        liveStates.get(row.item.pick.game_id) ?? null,
+        scoreFeeds.get(row.item.pick.game_id) ?? null,
+      );
+      // An in-play pick stays a Live card. Only a pre-game pick whose game
+      // has started or finished leaves the main list.
+      if (row.item.pick.is_live === true || kind === 'pre') main.push(row);
+      else started.push(row.item);
+    }
+    return { mainRows: dropEmptyDayHeaders(main), startedRows: started };
+  }, [groupStarted, listRows, liveStates, scoreFeeds]);
+  const mainHasPicks = mainRows.some((r) => r.kind === 'item');
+  // Collapsed by default. When every pick is already started, an empty list
+  // under a closed header hides the board, so open it.
+  useEffect(() => {
+    if (!mainHasPicks && startedRows.length > 0) setStartedOpen(true);
+  }, [mainHasPicks, startedRows.length]);
 
   // Games is shared with Stats. A game picked there (or here) can empty THIS
   // board while Today still has picks — the generic "widen signals / thresholds"
@@ -890,39 +1002,18 @@ export function PicksHomeScreen() {
   const [pulling, setPulling] = useState(false);
   const [partialRetrying, setPartialRetrying] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
-  const subtitle = view === 'scoreboard'
+  // Signals no longer has a subtitle (Matt, 2026-11-27). Live keeps its
+  // clock line: no date, because a game that started before midnight ET is
+  // filed under yesterday everywhere else (UX review, 2026-09-06).
+  const subtitle = view !== 'live'
     ? ''
     : failed
-    ? view === 'live'
       ? 'Live signals unavailable'
-      : `${date} · — pre-game signals`
-      // NO DATE on the live board, and that is not a tidy-up. The board can now
-      // hold a game that kicked off before midnight ET, which the whole system
-      // files under YESTERDAY -- Discord posted it under that date, the track
-      // record will file it under that date, and the pick's own timing card
-      // says so one tap away. Nothing on a live card carries a date, so the
-      // header was the only one a reader got, and it was the wrong one.
-      // Everything here is by definition happening now, so the date carries no
-      // information and carried wrong information (UX review, 2026-09-06;
-      // Apple Sports and FotMob both replace the date with the clock in play).
-      : view === 'live'
-        ? // An always-on board is read when it is empty too, so the header says
-          // so in words rather than handing back "0 in play". Not before the
-          // first fetch has answered, though: that is unknown, not empty.
-          liveUnknown
-          ? '— in play'
-          : liveData.length === 0
+      : liveUnknown
+        ? '— in play'
+        : liveData.length === 0
           ? 'No live signals right now'
-          : `${liveData.length} in play${stakedSuffix}`
-        // "PRE-GAME signals". Signals and Live Signals are disjoint sets —
-        // fetchPicksForDate excludes is_live rows — so `Signals (3)` beside
-        // `Live Signals (2)` is five standing bets, not two of three. Naming the
-        // third board "Live Signals" is what invites the subset reading, and the
-        // person it misleads is the one adding up exposure (UX review,
-        // 2026-09-12). "signals", not "live", for the older reason: with a
-        // segment labelled Live on the same control, "3 live" meant two different
-        // things one line apart.
-        : `${date} · ${todayUnknown ? '—' : live.length} pre-game signals${stakedSuffix}`;
+          : `${liveData.length} in play${stakedSuffix}`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -955,45 +1046,92 @@ export function PicksHomeScreen() {
         </View>
         {picksHold ? null : (
         <>
-        {!signalsLocked && view !== 'scoreboard' ? (
+        {!signalsLocked && view === 'live' && !searchOpen ? (
         <Text style={styles.subtitle} accessibilityLabel={unknownCountSpeech(unitsSpeech(subtitle))}>{subtitle}</Text>
         ) : null}
-        {/* Bet all across every sport (Matt, 2026-11-27), above the sport
-            chips because it covers all of them. */}
-        {betAllEverySport && showBetAllSports ? (
+        {showBetAllRow ? (
           <Pressable
-            onPress={() => setBetAllScope('all')}
+            onPress={() => setBetAllOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Bet all sports: ${betAllEverySport.picks.length} of ${betAllEverySport.picks.length + betAllEverySport.skipped.length} ready across ${everySportCount} sports, as single bets`}
-            accessibilityHint="Opens every sport's pre-game signals. Board filters don't apply."
-            style={({ pressed }) => [styles.betAllSportsRow, pressed && styles.betAllPressed]}
+            accessibilityLabel={`Bet all, ${betAllReady} ready in ${sportDisplayName(sport)}`}
+            accessibilityHint="Opens Bet all for this sport. All sports is a choice inside."
+            hitSlop={{ top: 2, bottom: 2 }}
+            style={({ pressed }) => [styles.betAllReadyRow, pressed && styles.betAllPressed]}
           >
             <Ionicons name="layers-outline" size={18} color={colors.tint} />
-            <Text style={styles.betAllSportsText} numberOfLines={2}>
-              {`Bet all sports · ${betAllEverySport.picks.length} of ${betAllEverySport.picks.length + betAllEverySport.skipped.length} ready across ${everySportCount} sports`}
+            <Text style={styles.betAllReadyText} numberOfLines={1}>
+              {`Bet all · ${betAllReady} ready in ${sportDisplayName(sport)}`}
             </Text>
             <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
           </Pressable>
         ) : null}
         {/* Neutral chips until today's board (and the live one) is known: built
             from empty data, every chip read muted and "no picks today" after a
-            failure or before the first load (Designer #845). */}
-        {!signalsLocked && view !== 'scoreboard' ? (
-          <SportToggle
-            available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
-            // undefined until today's board is known: built from empty data the
-            // row would draw in SPORTS order, then reshuffle (orderSportChips).
-            signalCounts={todayUnknown ? undefined : sportSignalCounts}
-            liveSports={liveSports}
-            // H9, 45pt with no visual change: 6pt over the subtitle line above
-            // (text, not a control) and half of the 12pt gap to the sub-tab chips
-            // below — they take the other half (SUBTAB_REACH_ABOVE).
-            // With the Bet all sports row above, the reach's 6pt past the
-            // chips' own wrap falls inside that row's 8pt bottom margin, so
-            // it never takes a tap meant for the row (UX review, 2026-11-27).
-            reachAbove={6}
-            reachBelow={4}
-          />
+            failure or before the first load (Designer #845). Search replaces
+            the chips and the segments (Matt, 2026-11-27). */}
+        {!signalsLocked && view !== 'scoreboard' && searchOpen ? (
+          <View style={styles.searchOpenRow}>
+            <View style={styles.searchField}>
+              <Ionicons name="search" size={16} color={colors.tint} />
+              <TextInput
+                ref={searchRef}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search player or team"
+                placeholderTextColor={colors.textTertiary}
+                accessibilityLabel="Search player or team"
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                style={styles.searchInput}
+              />
+            </View>
+            <Pressable
+              onPress={() => { setSearch(''); setSearchOpen(false); }}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              style={styles.searchCancelHit}
+            >
+              <Text style={styles.searchCancel}>Cancel</Text>
+            </Pressable>
+          </View>
+        ) : !signalsLocked && view !== 'scoreboard' ? (
+          <View style={styles.chipTools}>
+            <View style={styles.chipToolsToggle}>
+              <SportToggle
+                available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
+                signalCounts={todayUnknown ? undefined : sportSignalCounts}
+                liveSports={liveSports}
+                reachAbove={6}
+                reachBelow={4}
+              />
+            </View>
+            <Pressable
+              onPress={() => setSearchOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Search player or team"
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              style={({ pressed }) => [styles.searchIcon, pressed && styles.betAllPressed]}
+            >
+              <Ionicons name="search" size={18} color={colors.tint} />
+            </Pressable>
+            <Pressable
+              onPress={() => setFiltersOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={filterCount > 0 ? `Filters, ${filterCount} active` : 'Filters'}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              style={({ pressed }) => [styles.filtersPill, filterCount > 0 && styles.filtersPillOn, pressed && styles.betAllPressed]}
+            >
+              <Ionicons name="options-outline" size={14} color={colors.tint} />
+              <Text style={styles.filtersPillText}>Filters</Text>
+              {filterCount > 0 ? (
+                <View style={styles.filtersBadge}>
+                  <Text style={styles.filtersBadgeText}>{filterCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
         ) : null}
         {/* Horizontal scroller, the same one SportToggle uses. Three segments
             with counts and a dot fit comfortably at default text size, but only
@@ -1007,6 +1145,7 @@ export function PicksHomeScreen() {
             SCROLL-INTO-VIEW on the selected segment — a deep link from Settings
             or a push can select one that is off-screen, and a control showing
             three unselected segments reads as a rendering bug. */}
+        {searchOpen ? null : (
         <View style={subTabsReach.frame}>
         <ScrollView
           ref={segmentsRef}
@@ -1062,6 +1201,7 @@ export function PicksHomeScreen() {
           </View>
         ) : null}
         </View>
+        )}
         </>
         )}
       </View>
@@ -1207,8 +1347,7 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {boardItems.length > 0 ? (
-        <PickFilters
+      <PickFilters
           state={displayFilter}
           onChange={setFilter}
           sortKey={sortKey}
@@ -1216,7 +1355,12 @@ export function PicksHomeScreen() {
           publicSortAvailable={publicSortLive}
           search={search}
           onSearchChange={setSearch}
-          totalShown={filtered.length}
+          externalChrome
+          filtersOpen={filtersOpen}
+          onFiltersOpenChange={setFiltersOpen}
+          onActiveCount={setFilterCount}
+          finalsInStartedGroup={finalsInStartedGroup}
+          totalShown={searchingAll ? listRows.filter((r) => r.kind === 'item').length : filtered.length}
           totalAll={statusPoolSize}
           availableModelIds={availableModelIds}
           selectableModelIds={selectableModelIds}
@@ -1240,19 +1384,38 @@ export function PicksHomeScreen() {
           showSignals={false}
           itemNoun={view === 'live' ? 'live pick' : 'signal'}
         />
-      ) : null}
 
       <FlatList
-        ListFooterComponent={<BetslipBarSpacer />}
-        data={rows}
+        ListFooterComponent={
+          <>
+            {startedRows.length > 0 ? (
+              <StartedGroup
+                rows={startedRows}
+                liveStates={liveStates}
+                scoreFeeds={scoreFeeds}
+                expanded={startedOpen}
+                onToggle={() => setStartedOpen((v) => !v)}
+                tracked={tracked.isTracked}
+                onToggleTrack={(pick) => tracked.toggle(pick)}
+                onOpen={(pick) => navigation.navigate('PickDetail', { pickId: pick.pick_id })}
+                onRecord={() => navigation.navigate('Tabs', { screen: 'TrackRecord' })}
+                teamAbbrevs={ncaafAbbrevs}
+              />
+            ) : null}
+            <BetslipBarSpacer />
+          </>
+        }
+        data={mainRows}
+        extraData={startedOpen}
+        keyboardShouldPersistTaps="handled"
         keyExtractor={(row) => row.key}
         ListHeaderComponent={
           <>
           {/* One-time AI Assistant card / trial-to-paid sheet (mockups 5, 7). */}
-          {view === 'signals' ? (
+          {view === 'signals' && !searchingAll ? (
             <AiAssistantIntro onSetUp={() => navigation.navigate('AiAssistant')} />
           ) : null}
-          {view === 'signals' && !signalsLocked ? (
+          {view === 'signals' && !signalsLocked && !searchingAll ? (
             <ByomOpenBetsSection
               title="My models"
               bets={myModelBetsHere}
@@ -1263,38 +1426,10 @@ export function PicksHomeScreen() {
               onOpen={(bet) => navigation.navigate('ByomDetail', { modelId: bet.model_id })}
             />
           ) : null}
-          {betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
-            <View style={styles.betAllRow}>
-              <View style={styles.betAllText}>
-                <Text style={styles.betAllTitle}>
-                  {betAll.skipped.length > 0
-                    ? `${betAll.picks.length} of ${betAll.picks.length + betAll.skipped.length} ready to bet as singles`
-                    : `${betAll.picks.length} ready to bet as singles`}
-                </Text>
-                {/* Every skip, with its reason, whenever one is left out
-                    (Matt, 2026-11-27: "1 ready" beside four signals read as
-                    a bug). The sheet still names each pick. */}
-                <Text style={styles.betAllNote}>
-                  {betAll.skipped.length > 0 ? `${betAllSkipSummary(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => setBetAllScope('sport')}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  betAll.picks.length === 0
-                    ? 'Bet all 0, none ready'
-                    : `Bet all ${betAll.picks.length} ${sportDisplayName(sport)} signals as single bets`
-                }
-                accessibilityHint={betAll.picks.length === 0 ? 'Shows the skipped signals and why' : undefined}
-                style={({ pressed }) => [
-                  styles.betAllButton,
-                  pressed && styles.betAllPressed,
-                ]}
-              >
-                <Text style={styles.betAllButtonText}>{`Bet all ${betAll.picks.length}`}</Text>
-              </Pressable>
-            </View>
+          {searchingAll ? (
+            <Text style={styles.searchMatch} accessibilityLiveRegion="polite">
+              {searchMatchLine(listRows.filter((r) => r.kind === 'item').length, search.trim())}
+            </Text>
           ) : null}
           </>
         }
@@ -1327,11 +1462,13 @@ export function PicksHomeScreen() {
               showSignalBadge={false}
               paused={isPausedForDisplay(item.pick)}
               layout="signals"
+              trimmed={item.pick.is_live !== true && (view === 'signals' || searchingAll)}
               teamAbbrevs={ncaafAbbrevs}
             />
           );
         }}
         ListEmptyComponent={
+          startedRows.length > 0 ? null :
           busy ? (
             <PicksSkeleton sport={sport} />
           ) : failed ? (
@@ -1348,8 +1485,8 @@ export function PicksHomeScreen() {
               sport={sport}
               date={date}
               scored={todayStats.total}
-              hasAny={activeItems.length > 0}
-              search={emptiedBySearch ? search.trim() : ''}
+              hasAny={searchingAll || activeItems.length > 0}
+              search={(searchingAll && mainRows.length === 0 && startedRows.length === 0) || emptiedBySearch ? search.trim() : ''}
               onClearSearch={() => setSearch('')}
               emptiedByGames={emptiedByGames}
               gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
@@ -1384,18 +1521,98 @@ export function PicksHomeScreen() {
       )}
       {betAllSheet ? (
         <BetAllSheet
-          visible={betAllScope != null}
-          sport={betAllScope === 'all' ? 'All sports' : sportDisplayName(sport)}
-          showSport={betAllScope === 'all'}
-          candidates={betAllSheet}
+          visible={betAllOpen}
+          sportLabel={sportDisplayName(sport)}
+          sportCandidates={betAllSheet.sport}
+          allCandidates={betAllSheet.all}
           myBooks={myBooks}
           isTracked={tracked.isTracked}
           onTrack={tracked.trackMany}
           onUntrack={tracked.untrackPick}
-          onClose={() => setBetAllScope(null)}
+          onClose={() => setBetAllOpen(false)}
         />
       ) : null}
     </SafeAreaView>
+  );
+}
+
+/** 36pt circular search control at the end of the sport-chip row. */
+const SEARCH_ICON_PT = 36;
+
+function searchMatchLine(count: number, query: string): string {
+  const noun = count === 1 ? 'signal matches' : 'signals match';
+  return `${count} ${noun} “${query}” · all sports`;
+}
+
+function dropEmptyDayHeaders<T>(rows: DayRow<T>[]): DayRow<T>[] {
+  const out: DayRow<T>[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (row.kind === 'day' && (i + 1 >= rows.length || rows[i + 1]!.kind !== 'item')) continue;
+    out.push(row);
+  }
+  return out;
+}
+
+function StartedGroup({
+  rows,
+  liveStates,
+  scoreFeeds,
+  expanded,
+  onToggle,
+  tracked,
+  onToggleTrack,
+  onOpen,
+  onRecord,
+  teamAbbrevs,
+}: {
+  rows: EnrichedPick[];
+  liveStates: Map<string, import('@/types').LiveGameStateRow>;
+  scoreFeeds: Map<string, import('@/lib/scoreboard').ScoreboardFeed>;
+  expanded: boolean;
+  onToggle: () => void;
+  tracked: (pick: import('@/types').Pick) => boolean;
+  onToggleTrack: (pick: import('@/types').Pick) => void;
+  onOpen: (pick: import('@/types').Pick) => void;
+  onRecord: () => void;
+  teamAbbrevs: ReadonlyMap<string, string> | null;
+}) {
+  return (
+    <View style={styles.startedGroup}>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={`Started, ${rows.length} ${rows.length === 1 ? 'pick' : 'picks'}`}
+        style={({ pressed }) => [styles.startedHeader, pressed && styles.betAllPressed]}
+      >
+        <Text style={styles.startedTitle}>{`Started (${rows.length})`}</Text>
+        <Text style={styles.startedHint}>Games under way or final</Text>
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} />
+      </Pressable>
+      {expanded ? rows.map((item) => {
+        const kind = startedBoardKind(
+          item.game,
+          liveStates.get(item.pick.game_id) ?? null,
+          scoreFeeds.get(item.pick.game_id) ?? null,
+        );
+        return (
+          <StartedPickRow
+            key={String(item.pick.pick_id)}
+            item={item}
+            kind={kind === 'final' ? 'final' : 'live'}
+            liveState={liveStates.get(item.pick.game_id) ?? null}
+            scoreFeed={scoreFeeds.get(item.pick.game_id) ?? null}
+            tracked={tracked(item.pick)}
+            onPress={() => onOpen(item.pick)}
+            onToggleTrack={() => onToggleTrack(item.pick)}
+            onRecord={onRecord}
+            teamAbbrevs={teamAbbrevs}
+          />
+        );
+      }) : null}
+      <Text style={styles.startedFooter}>Final results are in Record</Text>
+    </View>
   );
 }
 
@@ -1698,25 +1915,108 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   betAllPressed: { opacity: opacity.pressed },
-  betAllSportsRow: {
+  betAllReadyRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    minHeight: 44,
+    minHeight: 40,
     marginTop: spacing.sm,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.tint,
+    backgroundColor: colors.tintSoft,
   },
-  betAllSportsText: {
+  betAllReadyText: {
     flex: 1,
     minWidth: 0,
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.tint,
     fontVariant: ['tabular-nums'],
+  },
+  chipTools: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  chipToolsToggle: { flex: 1, minWidth: 0 },
+  searchIcon: {
+    width: SEARCH_ICON_PT,
+    height: SEARCH_ICON_PT,
+    borderRadius: SEARCH_ICON_PT / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  filtersPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minHeight: SEARCH_ICON_PT,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  filtersPillOn: { borderColor: colors.tint },
+  filtersPillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  filtersBadge: {
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: colors.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filtersBadgeText: {
+    fontSize: font.size.nano,
+    fontWeight: font.weight.bold,
+    color: colors.textInverse,
+  },
+  searchOpenRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  searchField: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.tint,
+    backgroundColor: colors.bgCard,
+  },
+  searchInput: { flex: 1, fontSize: font.size.body, color: colors.textPrimary, paddingVertical: spacing.xs },
+  searchCancelHit: { minHeight: 44, justifyContent: 'center' },
+  searchCancel: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.tint },
+  searchMatch: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  startedGroup: { marginTop: spacing.sm },
+  startedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    minHeight: 44,
+  },
+  startedTitle: { fontSize: font.size.body, fontWeight: font.weight.bold, color: colors.textPrimary },
+  startedHint: { flex: 1, fontSize: font.size.caption, color: colors.textTertiary },
+  startedFooter: {
+    textAlign: 'center',
+    marginBottom: spacing.md,
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
   },
   betAllButtonText: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textInverse, fontVariant: ['tabular-nums'] },
   container: {
