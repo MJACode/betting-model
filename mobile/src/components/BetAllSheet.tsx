@@ -125,6 +125,10 @@ export function BetAllSheet({
   const awaiting = useRef<string | null>(null);
   const listRef = useRef<ScrollView>(null);
   const notIncludedY = useRef(0);
+  // The footer (tracking note, totals, button) sits over the end of the
+  // scroll. Padding the content by the footer's measured height lets the
+  // last Not included row scroll clear of it.
+  const [footerHeight, setFooterHeight] = useState(0);
   // Tracked picks that are ticked: named above the button so a bet already
   // placed is never sent to a book again unnoticed (UX review, 2026-11-21).
   // Read AFTER `selected` is declared: above it, the shipped bundle reads
@@ -443,7 +447,12 @@ export function BetAllSheet({
                 </ScrollView>
               ) : null}
 
-              <ScrollView ref={listRef} style={styles.list} bounces={false}>
+              <ScrollView
+                ref={listRef}
+                style={styles.list}
+                contentContainerStyle={{ paddingBottom: footerHeight }}
+                bounces={false}
+              >
                 {mode === 'best' ? (
                   bestGroups.map((g) => (
                     <View key={g.key} style={styles.group}>
@@ -468,7 +477,7 @@ export function BetAllSheet({
                 )}
                 {skipped.length > 0 ? (
                   <View
-                    style={[styles.group, styles.notIncluded]}
+                    style={styles.group}
                     onLayout={(e) => { notIncludedY.current = e.nativeEvent.layout.y; }}
                   >
                     <Text style={styles.groupTitle}>Not included</Text>
@@ -486,7 +495,7 @@ export function BetAllSheet({
                 ) : null}
               </ScrollView>
 
-              <View style={styles.footer}>
+              <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
                 {trackedTicked > 0 ? (
                   <Text style={styles.warn}>
                     {`${trackedTicked} you’re already tracking ${trackedTicked === 1 ? 'is' : 'are'} included. Untick ${trackedTicked === 1 ? 'it' : 'them'}, or pick Not tracked in Filters to leave ${trackedTicked === 1 ? 'it' : 'them'} out.`}
@@ -655,7 +664,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  notIncluded: { marginBottom: spacing.xxl },
   seeList: { minHeight: 44, justifyContent: 'center' },
   seeListText: { color: colors.tint, fontWeight: font.weight.semibold, fontSize: font.size.footnote },
   selectAll: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center' },

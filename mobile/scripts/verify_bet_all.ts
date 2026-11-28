@@ -25,6 +25,7 @@ import { combineBetslipLinks, combineSinglesLinks } from '../src/lib/betslipLink
 import {
   BET_ALL_LIVE_NOTE,
   betAllCandidates,
+  sportBetAllCandidates,
   betAllMainSkip,
   betAllSkipSummary,
   betAllSports,
@@ -35,7 +36,7 @@ import {
   planTotals,
   type BetAllPick,
 } from '../src/lib/betAll';
-import { passesActionFilter, stakeFor } from '../src/lib/thresholds';
+import { passesActionFilter, passesRecordFilter, stakeFor } from '../src/lib/thresholds';
 import type { EnrichedPick, Pick } from '../src/types';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -211,6 +212,53 @@ const avoid = { pick: { ...pk(10, 'Under 150.5'), signal_type: 'AVOID', game_id:
 const none = betAllCandidates([live, avoid], () => null, ['draftkings']);
 check('live and non-BET rows are neither sent nor listed', none.picks.length === 0 && none.skipped.length === 0);
 check('the live call-out is the decided copy', BET_ALL_LIVE_NOTE === 'Pre-game signals only. Live bets aren’t included.');
+
+// A finished pick is not on the open board (useTodayPicks keeps it apart),
+// and a graded one is dropped by openForAction even if it is. The sport
+// sheet must still name it as started, and must not offer it.
+function signalRow(id: number, label: string, result: string | null, game: Record<string, unknown> | null): EnrichedPick {
+  return {
+    pick: {
+      ...pk(id, label),
+      signal_type: 'BET',
+      model_id: 'ncaab_live_spread_h1',
+      model_probability: 0.6,
+      edge: 0.08,
+      dk_odds: -110,
+      decision_odds: -110,
+      result,
+      is_live: false,
+      game_id: `g${id}`,
+      game_time: '2020-01-01T18:00:00Z',
+      sport: 'NCAAB',
+      condition_status: null,
+    },
+    game,
+    weather: null,
+    bookRows: [],
+  } as unknown as EnrichedPick;
+}
+const startedGame = { sport: 'NCAAB', commence_time: '2020-01-01T18:00:00Z', home_score: null, away_score: null };
+const finalGame = { sport: 'NCAAB', commence_time: '2020-01-01T18:00:00Z', home_score: 88, away_score: 85 };
+const pineBluff = signalRow(4, 'Arkansas-Pine Bluff +49.5', null, startedGame);
+const memphis = signalRow(5, 'Memphis -1.5', 'LOSS', finalGame);
+check('the started fixture clears its cut', passesActionFilter(pineBluff.pick));
+check('the graded final clears the record filter', passesRecordFilter(memphis.pick));
+const dropped = betAllCandidates([memphis], () => null, ['draftkings']);
+check('betAllCandidates alone drops a graded final', dropped.picks.length === 0 && dropped.skipped.length === 0);
+const sportSheet = sportBetAllCandidates([pineBluff], [memphis], () => null, ['draftkings']);
+const skip = (rows: { key: string; reason: string }[], id: string) => rows.find((r) => r.key === id);
+check('the open board’s started game is not included',
+  skip(sportSheet.skipped, '4')?.reason === 'started' && !sportSheet.picks.some((p) => p.key === '4'));
+check('the graded final the open board does not hold is not included as started',
+  skip(sportSheet.skipped, '5')?.reason === 'started' && sportSheet.skipped.find((s) => s.key === '5')?.label === 'Memphis -1.5');
+check('that final is not bettable and does not count as ready', !sportSheet.picks.some((p) => p.key === '5'));
+check('the note counts the final with the other started games',
+  betAllSkipSummary(sportSheet.skipped) === '2 not included: 2 games started');
+const alsoOnBoard = sportBetAllCandidates([pineBluff, memphis], [memphis], () => null, ['draftkings']);
+check('a final that is also on the open list is still only a skip',
+  !alsoOnBoard.picks.some((p) => p.key === '5') && skip(alsoOnBoard.skipped, '5')?.reason === 'started'
+  && alsoOnBoard.skipped.filter((s) => s.key === '5').length === 1);
 
 // ── wiring ──────────────────────────────────────────────────────────────
 const card = read('src/components/PickCard.tsx');

@@ -114,7 +114,7 @@ import {
 } from '@/lib/trackedFilter';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { BetAllSheet } from '@/components/BetAllSheet';
-import { betAllCandidates } from '@/lib/betAll';
+import { betAllCandidates, sportBetAllCandidates } from '@/lib/betAll';
 import { startedBoardKind } from '@/lib/startedBoard';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
@@ -796,17 +796,19 @@ export function PicksHomeScreen() {
   );
   // Bet all reads the board as filtered, so it sends what the member sees.
   // Signals only: Live Signals is never part of it (Matt, 2026-11-14).
-  // Bet all follows the board's filters, not the search box: search covers
-  // every sport and must not shrink "ready in NCAAB". Finals stay in the
-  // pool so the sheet lists them under Not included as games started
-  // (betAllCandidates skips a game that has started). They are not ready.
-  const betAllPool = unsearched;
+  // Bet all follows the board's filters, not the search box. Finished picks
+  // are not on that list. sportBetAllCandidates adds this sport's finals to
+  // the skip list only, so they are named and never ready.
+  const sportFinals = useMemo(
+    () => finishedSignals.filter((d) => d.pick.sport === sport),
+    [finishedSignals, sport],
+  );
   const betAll = useMemo(
     () =>
       view === 'signals' && myBooksReady && !signalsLocked
-        ? betAllCandidates(betAllPool, (id) => liveStates.get(id) ?? null, myBooks)
+        ? sportBetAllCandidates(unsearched, sportFinals, (id) => liveStates.get(id) ?? null, myBooks)
         : null,
-    [view, myBooksReady, signalsLocked, betAllPool, liveStates, myBooks, thresholdsRevision],
+    [view, myBooksReady, signalsLocked, unsearched, sportFinals, liveStates, myBooks, thresholdsRevision],
   );
   // Bet all across EVERY sport (Matt, 2026-11-27: one tap for every signal,
   // not one per sport tab). It reads the signals themselves, not this tab's

@@ -83,8 +83,9 @@ def test_finals_count_on_the_chip_the_signals_tab_and_the_sport_sheet():
     assert "counts[s] = (counts[s] ?? 0) + 1" in home
     assert "const signalsOnBoard = live.length + finishedSignals.filter" in home
     assert "count={todayUnknown ? null : signalsOnBoard}" in home
-    # Finals stay in the sport Bet all pool, so they are listed as started.
-    assert "const betAllPool = unsearched" in home
+    # Finished picks are not on the open board. The sport sheet adds them
+    # as skips, and never as ready picks.
+    assert "sportBetAllCandidates(unsearched, sportFinals," in home
     assert "unsearched.filter((d) => stateByItem.get(d) !== 'final')" not in home
     # The money line still ignores a finished game.
     assert "filtered.filter((d) => stateByItem.get(d) !== 'final')" in home
