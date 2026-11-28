@@ -564,7 +564,7 @@ function PickDetailContent({
                   ? game.home_team
                   : `${game.away_team} ${isVersusSport(game.sport) ? 'vs' : '@'} ${game.home_team}`}
               </Text>
-              <GameStatusPill game={game} compact={false} live={liveState} />
+              <GameStatusPill game={game} compact={false} live={liveState} pickSide={pick.pick_side} />
             </View>
           ) : null}
           {/* The matchup page for this game (Matt, 2026-11-23), where the

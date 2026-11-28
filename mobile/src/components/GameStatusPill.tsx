@@ -13,7 +13,7 @@ import {
 import { LiveDot } from '@/components/LiveDot';
 import { gameStatusSpeech } from '@/lib/a11y';
 import { colors, font, opacity, radii } from '@/lib/theme';
-import { feedView, type ScoreboardFeed } from '@/lib/scoreboard';
+import { feedView, scoreSides, type ScoreboardFeed } from '@/lib/scoreboard';
 import type { GameRow, LiveGameStateRow } from '@/types';
 
 interface Props {
@@ -45,14 +45,24 @@ interface Props {
    * to go and look at.
    */
   onPress?: () => void;
+  /**
+   * The pick's side. A home / away pick draws its own team's label and score
+   * at full weight and the other side quieter (Matt, 2026-11-27).
+   */
+  pickSide?: string | null;
+  /** Team codes for the labels, the same map the Scoreboard tab uses. */
+  abbrevs?: ReadonlyMap<string, string> | null;
 }
 
-export function GameStatusPill({ game, compact = true, live, scheduledStart, feed, onPress }: Props) {
+export function GameStatusPill({ game, compact = true, live, scheduledStart, feed, onPress, pickSide, abbrevs }: Props) {
+  const scoreOf = (away: number | null, home: number | null) => (
+    <ScoreText game={game} away={away} home={home} pickSide={pickSide} abbrevs={abbrevs} />
+  );
   const fromFeed = feedView(game ?? null, feed);
   if (fromFeed) {
     const body = fromFeed.kind === 'live' ? (
       <View style={styles.row}>
-        {fromFeed.score ? <Text style={styles.scoreText}>{fromFeed.score}</Text> : null}
+        {fromFeed.score ? scoreOf(fromFeed.awayScore, fromFeed.homeScore) : null}
         {fromFeed.clock ? <Text style={styles.inningText}>{fromFeed.clock}</Text> : null}
         <View style={[styles.pill, styles.livePill]}>
           <LiveDot />
@@ -61,7 +71,7 @@ export function GameStatusPill({ game, compact = true, live, scheduledStart, fee
       </View>
     ) : (
       <View style={styles.row}>
-        <Text style={styles.scoreText}>{fromFeed.score}</Text>
+        {scoreOf(fromFeed.awayScore, fromFeed.homeScore)}
         <View style={[styles.pill, styles.finalPill]}>
           <Text style={styles.finalText}>FINAL</Text>
         </View>
@@ -69,7 +79,7 @@ export function GameStatusPill({ game, compact = true, live, scheduledStart, fee
     );
     return wrap(body, fromFeed.speech, onPress);
   }
-  const inner = statusBody(game, compact, live, scheduledStart);
+  const inner = statusBody(game, compact, live, scheduledStart, scoreOf);
   if (!inner) return null;
   return inner.started ? wrap(inner.node, inner.speech, onPress) : inner.node;
 }
@@ -114,6 +124,7 @@ function statusBody(
   compact: boolean,
   live: LiveGameStateRow | null | undefined,
   scheduledStart: string | null | undefined,
+  scoreOf: (away: number | null, home: number | null) => React.ReactElement,
 ): { node: React.ReactElement; speech: string; started: boolean } | null {
   const movedTo = postponedStart(game, scheduledStart);
   if (movedTo) {
@@ -129,7 +140,7 @@ function statusBody(
   }
   const status = gameStatus(game, live);
   // Spoken form (audit M22): "Live, bottom 9th, 3 to 2", not "3 dash 2 B9 live".
-  const spoken = gameStatusSpeech(status, gameDayLabelET(game?.commence_time));
+  const spoken = gameStatusSpeech(status, gameDayLabelET(game?.commence_time), game);
 
   if (status.kind === 'pre') {
     if (!status.timeLabel) return null;
@@ -148,7 +159,6 @@ function statusBody(
   }
 
   if (status.kind === 'live') {
-    const scoreStr = scoreLabel(status.awayScore, status.homeScore);
     // Compact (card header): "T5". Roomy (detail): "Top 5th · 2 out".
     const inningStr = compact
       ? inningShort(status.inning, status.inningHalf)
@@ -158,7 +168,7 @@ function statusBody(
       speech: spoken ?? 'Live',
       node: (
         <View style={styles.row}>
-          {scoreStr ? <Text style={styles.scoreText}>{scoreStr}</Text> : null}
+          {status.awayScore != null && status.homeScore != null ? scoreOf(status.awayScore, status.homeScore) : null}
           {inningStr ? <Text style={styles.inningText}>{inningStr}</Text> : null}
           <View style={[styles.pill, styles.livePill]}>
             <LiveDot />
@@ -178,7 +188,7 @@ function statusBody(
     speech: spoken ?? 'Final',
     node: (
       <View style={styles.row}>
-        <Text style={styles.scoreText}>{scoreLabel(status.awayScore, status.homeScore)}</Text>
+        {scoreOf(status.awayScore, status.homeScore)}
         <View style={[styles.pill, styles.finalPill]}>
           <Text style={styles.finalText}>FINAL</Text>
         </View>
@@ -187,9 +197,40 @@ function statusBody(
   };
 }
 
-function scoreLabel(away: number | null, home: number | null): string {
-  if (away == null || home == null) return '';
-  return `${away}–${home}`;
+/**
+ * "SJ 50 · IS 59", away first like the header above it. A bare "50–59" read
+ * as our team first (Matt, 2026-11-27). The picked side is full weight and
+ * primary ink; the other side medium weight, secondary ink. Spoken text is the
+ * caller's (the card or the pill's label), so this is not its own element.
+ */
+function ScoreText({
+  game,
+  away,
+  home,
+  pickSide,
+  abbrevs,
+}: {
+  game: GameRow | null | undefined;
+  away: number | null;
+  home: number | null;
+  pickSide?: string | null;
+  abbrevs?: ReadonlyMap<string, string> | null;
+}) {
+  const sides = scoreSides(game, away, home, pickSide, abbrevs);
+  if (!sides) {
+    if (away == null || home == null) return null;
+    return <Text style={styles.scoreText}>{`${away}–${home}`}</Text>;
+  }
+  const anyPicked = sides.away.picked || sides.home.picked;
+  const sideStyle = (picked: boolean) =>
+    anyPicked ? (picked ? styles.scorePicked : styles.scoreOther) : null;
+  return (
+    <Text style={styles.scoreText} numberOfLines={1}>
+      <Text style={sideStyle(sides.away.picked)}>{`${sides.away.label} ${sides.away.score}`}</Text>
+      <Text style={styles.scoreSep}>{' · '}</Text>
+      <Text style={sideStyle(sides.home.picked)}>{`${sides.home.label} ${sides.home.score}`}</Text>
+    </Text>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -210,6 +251,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  scorePicked: {
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  scoreOther: {
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  scoreSep: {
+    color: colors.textTertiary,
   },
   inningText: {
     fontSize: font.size.caption,

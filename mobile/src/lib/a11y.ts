@@ -128,13 +128,22 @@ export type StatusForSpeech =
  * 9th, 3 to 2". Scores are away–home, as printed. Null when the pill renders
  * nothing (no start time, or an ended game with no score).
  */
-export function gameStatusSpeech(status: StatusForSpeech, dayLabel?: string | null): string | null {
+export function gameStatusSpeech(
+  status: StatusForSpeech,
+  dayLabel?: string | null,
+  teams?: { away_team: string; home_team: string } | null,
+): string | null {
+  // With the teams: "St. John's 50, Iowa State 59", as the feed path says it.
+  // Without: "50 to 59" (UX review, 2026-11-27: the printed score names each
+  // side, so the spoken one does too).
+  const said = (away: number, home: number) =>
+    teams ? `${teams.away_team} ${away}, ${teams.home_team} ${home}` : `${away} to ${home}`;
   if (status.kind === 'pre') {
     if (!status.timeLabel) return null;
     return `Starts ${dayLabel ? `${dayLabel}, ` : ''}${status.timeLabel}`;
   }
   if (status.kind === 'ended') return null;
-  if (status.kind === 'final') return `Final, ${status.awayScore} to ${status.homeScore}`;
+  if (status.kind === 'final') return `Final, ${said(status.awayScore, status.homeScore)}`;
   const inning =
     status.inning == null
       ? null
@@ -143,7 +152,7 @@ export function gameStatusSpeech(status: StatusForSpeech, dayLabel?: string | nu
   const score =
     status.awayScore == null || status.homeScore == null
       ? null
-      : `${status.awayScore} to ${status.homeScore}`;
+      : said(status.awayScore, status.homeScore);
   return joinLabel(['Live', inning, outs, score]);
 }
 

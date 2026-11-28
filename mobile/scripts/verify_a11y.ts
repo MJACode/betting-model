@@ -655,7 +655,7 @@ for (const x of H9_SHORT) console.log(`  (short: ${x.where} ≈ ${x.eff}pt — $
 
 console.log('\nM8 / M5 / M22 — spoken card');
 const card = read('src/components/PickCard.tsx');
-check('PickCard label carries game status + time (gameStatusSpeech)', /gameStatusSpeech\(gameStatus\(game, liveState\), gameDayLabelET\(game\?\.commence_time\)\)/.test(card));
+check('PickCard label carries game status + time (gameStatusSpeech)', /gameStatusSpeech\(gameStatus\(game, liveState\), gameDayLabelET\(game\?\.commence_time\), game\)/.test(card));
 check('PickCard label carries the stake, in words', /stakeCaption \? `Stake \$\{unitsSpeech\(stakeCaption\)\}` : null/.test(card));
 check('PickCard label carries when it posted and the started line', /timing \? timing\.label : null/.test(card) && /startedSpoken,/.test(card));
 check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && actionHandoff/.test(card));
@@ -741,6 +741,10 @@ async function behaviour() {
   check('gameStatusSpeech live, 1 out, top 11th', a.gameStatusSpeech({ kind: 'live', awayScore: 0, homeScore: 0, inning: 11, inningHalf: 'top', outs: 1 }) === 'Live, top 11th, 1 out, 0 to 0');
   check('gameStatusSpeech live, no feed detail → "Live"', a.gameStatusSpeech({ kind: 'live', awayScore: null, homeScore: null, inning: null, inningHalf: null, outs: null }) === 'Live');
   check('gameStatusSpeech final → "Final, 5 to 3"', a.gameStatusSpeech({ kind: 'final', awayScore: 5, homeScore: 3 }) === 'Final, 5 to 3');
+  check('gameStatusSpeech final names each team when given them',
+    a.gameStatusSpeech({ kind: 'final', awayScore: 75, homeScore: 80 }, null, { away_team: "St. John's", home_team: 'Iowa State' }) === "Final, St. John's 75, Iowa State 80");
+  check('gameStatusSpeech live names each team when given them',
+    a.gameStatusSpeech({ kind: 'live', awayScore: 3, homeScore: 2, inning: 9, inningHalf: 'bottom', outs: 2 }, null, { away_team: 'NYY', home_team: 'BOS' }) === 'Live, bottom 9th, 2 outs, NYY 3, BOS 2');
   check('gameStatusSpeech pre with day → "Starts Sat 6/14, 10:00 PM ET"', a.gameStatusSpeech({ kind: 'pre', timeLabel: '10:00 PM ET' }, 'Sat 6/14') === 'Starts Sat 6/14, 10:00 PM ET');
   check('gameStatusSpeech pre, no time / ended → null', a.gameStatusSpeech({ kind: 'pre', timeLabel: '' }) === null && a.gameStatusSpeech({ kind: 'ended' }) === null);
   check('unitsSpeech("1.2u → 1.0u") → "1.2 units to win 1.0 units"', a.unitsSpeech('1.2u → 1.0u') === '1.2 units to win 1.0 units', a.unitsSpeech('1.2u → 1.0u'));

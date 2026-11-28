@@ -650,7 +650,7 @@ export function PickCard({
     ? postponedSpeech(movedTo)
     : fedStatus
       ? fedStatus.speech
-      : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+      : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time), game);
   // Started by the clock or the live row, or by the feed: a game that tips
   // before its listed time is live on the feed first.
   const gameStarted = gameStatus(game, liveState).kind !== 'pre' || fedStatus != null;
@@ -766,7 +766,7 @@ export function PickCard({
         {/* Live clock stays on this pill (Fixtured-style score + period).
             Do not invent a second clock chrome on the card. */}
         <View style={styles.headerStatus}>
-          <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} />
+          <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} pickSide={pick.pick_side} abbrevs={teamAbbrevs} />
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
       </View>
@@ -1154,7 +1154,7 @@ export function PickCard({
       {gameStarted || resultView ? (
         <View style={styles.statusRow}>
           {gameStarted ? (
-            <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} />
+            <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} pickSide={pick.pick_side} abbrevs={teamAbbrevs} />
           ) : null}
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
@@ -1536,6 +1536,12 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
+    // The labelled score ("SJ 50 · IS 59") is wider than "50–59": when the
+    // matchup and the status no longer fit on one line, the status drops to
+    // its own line instead of squeezing the matchup or overflowing at large
+    // text sizes (UX review, 2026-11-27).
+    flexWrap: 'wrap',
+    rowGap: spacing.xs,
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.xs,
@@ -1545,6 +1551,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    marginLeft: 'auto',
   },
   matchup: {
     // flex + truncation so a long matchup can never push the live score /
